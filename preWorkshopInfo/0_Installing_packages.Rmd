@@ -1,0 +1,144 @@
+---
+title: "Installing packages"
+subtitle: "Tips to install some of the packages"
+author: "Joe Watson & Marie Auger-Méthé"
+date: "12/02/2021"
+output: 
+  html_document:
+    css: "CSSdefs.css"
+    after_body: footer.html
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Installing packages: tips to install some of the packages
+
+Some of the packages we will use in the workshop are not available on CRAN and some require the installation of additional software and compilers.
+
+### Compilers
+
+C++ compilers are needed. 
+
+For Mac, installing Xcode is an easy way to install compilers. 
+You can install Xcode directly from the App store (it's free).
+
+You can also install it via terminal, but because it is a very large program it's worth checking if you already have it installed. If not, open terminal and run:
+
+```{r,eval=F}
+xcode-select --install
+```
+
+For Windows, installing Rtools is an easy way to install compilers. Rtools is found [cran.r-project.org/bin/windows/Rtools](https://cran.r-project.org/bin/windows/Rtools/index.html)
+
+For Linux, the necessary compilers are installed by default with R. To double check they are installed run:
+
+```{r,eval=F}
+gcc --version
+```
+
+If nothing is returned, then they can be installed manually as follows:
+
+```{r,eval=F}
+sudo apt update
+sudo apt install build-essential
+```
+
+
+### Required GIS software
+
+**The workshop is developed with latest version of gdal and geos. The workshop material will not work without them or if you are using outdated versions of these.** 
+
+If you do not have these software already installed, please install them (see below). **If you already have `rgdal` and gdal installed, verify that the version that's already installed is adequate. Load the `rgdal` package and use the function rgdal function `GDALis3ormore()` in R. It should return TRUE. We want gdal to use the appropriate PROJ transformation software ([proj.org](https://proj.org/)), so in addition the rgdal function `PROJis6ormore()` should return TRUE. If either return FALSE, update your gdal.**
+*Note new version of some of these GIS software and packages (e.g., sp) have made significant changes and might affect other code.*
+
+
+On Mac, installing these is easiest done using homebrew ([brew.sh](https://brew.sh/)). With homebrew installed, open terminal and run:
+
+```{r,eval=F}
+brew tap osgeo/osgeo4mac && brew tap --repair
+brew install pkg-config
+brew install proj
+brew install geos
+brew install gdal
+```
+
+On Windows, express install osgeo4w by following the instruction found at  [trac.osgeo.org/osgeo4w](https://trac.osgeo.org/osgeo4w/). This will install the PROJ, GDAL, and GEOS libraries.
+
+On Linux, run the following in the terminal:
+```{r,eval=F}
+sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable
+sudo apt-get update
+sudo apt-get install libudunits2-dev libgdal-dev libgeos-dev libproj-dev 
+```
+
+
+### Installing the latest version of the spatial packages
+
+The latest version of rgdal, rgeos, and sp are **required**. The workshop material **will not work without these**. These can be installed **after** the latest GIS software has been installed.
+
+```{r,eval=F}
+install.packages(c('rgdal','rgeos','sp','sf','spdep','maptools','spatstat'), dep=T)
+```
+
+
+### Packages not available on CRAN
+
+Our methodology highly depends on the INLA package. This **testing** version ($\geq$ 21.01.26) of this package must be installed directly from the [www.r-inla.org](https://www.r-inla.org) website. To do so, you can run the following in R:
+
+```{r eval=FALSE}
+install.packages("INLA", repos=c(getOption("repos"), INLA="https://inla.r-inla-download.org/R/testing"), dep=TRUE)
+```
+
+For more details, see [www.r-inla.org/download-install](https://www.r-inla.org/download-install).
+
+
+### Package that requires a special version
+
+inlabru is available on CRAN, but the version ($\geq$ 2.2.6) we need for this workshop is the new version **only available on GithHub**.
+
+To install packages from GitHub, we will use the package `remotes`.
+
+```{r,eval=F}
+install.packages('remotes')
+```
+
+Next, we will install `inlabru`
+
+```{r eval=FALSE}
+remotes::install_github("inlabru-org/inlabru", ref="stable")
+```
+
+Note, if you have an error of the type *Error: (converted from warning) package X was built under R version #.#.#* that aborts the whole install. Run `Sys.setenv("R_REMOTES_NO_ERRORS_FROM_WARNINGS" = "true")`.
+
+### Packages available on CRAN
+
+The remaining packages should be updated via CRAN (using install.packages()):
+
++ lubridate
++ maptools
++ readxl
++ ggmap
++ raster
+
+### Check that all packages are installed
+
+Once all the packages are installed, you can check that they are properly installed by loading them.
+
+```{r warning=FALSE, message=FALSE, error=FALSE, eval=FALSE}
+library(rgdal)
+library(rgeos)
+library(sp)
+library(sf)
+library(maptools)
+library(spatstat)
+library(spdep)
+library(INLA)
+library(inlabru)
+library(readxl)
+library(lubridate)
+library(ggmap)
+library(raster)
+```
