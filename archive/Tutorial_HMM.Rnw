@@ -1,0 +1,866 @@
+\documentclass{article}
+\usepackage{hyperref}
+\usepackage[top=2in, bottom=1.5in, left=1in, right=1in]{geometry}
+\usepackage{exercise}
+\usepackage{amsmath}
+
+% Paragraph indentation and line skip
+\setlength{\parindent}{0cm}
+\setlength{\parskip}{3mm plus2mm minus1mm}
+
+% For tilde
+\usepackage{xspace}
+\newcommand{\mytilde}{\lower.80ex\hbox{\char`\~}\xspace}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Hooks
+% Hook for tilde
+<<setup, include=FALSE>>=
+library(knitr)
+hook_source = knit_hooks$get('source')
+knit_hooks$set(source = function(x, options) {
+  txt = hook_source(x, options)
+  # extend the default source hook
+  gsub('~', '\\\\mytilde', txt)
+})
+@
+<<setupOp, include=FALSE>>=
+opts_chunk$set(fig.width=8, fig.height=6, fig.align="center", tidy=TRUE,
+               tidy.opts=list(blank=FALSE, width.cutoff=52),
+               size="large")
+@
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\author{Marie Auger-M\'eth\'e}
+\title{Tutorial - Hidden Markov Models}
+\date{}
+\maketitle
+
+\large
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Hidden Markov Models: tutorial goals and set up}
+
+The goal of this tutorial is to explore how to fit hidden Markov models (HMMs) to movement data. To do so, we will investigate a new R package, \texttt{momentuHMM}. This package builds on a slightly older package, \texttt{moveHMM}, that was developed by Th\'eo Michelot , Roland Langrock, and Toby Patterson, see associated paper: \url{https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.12578}. \texttt{momentuHMM}, was developed by Brett McClintock and Th\'eo Michelot. \texttt{momentuHMM} has new features such as allowing for more data streams, inclusion of covariates as raster layers, and much more, see associated paper: \url{https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.12995}.
+
+% My papers: ?
+
+\subsection{Setup and data preparation}
+
+First, let's load the packages that we will need to complete the analyses. Off course you need to have them installed first.
+
+<<LoadPackages, message=FALSE, warning=FALSE>>=
+library(momentuHMM) # Package for fitting HMMs, builds on moveHMM
+library(sp) # For GIS tasks (e.g. geographic transformations)
+library(raster) # For raster spatial covariates
+@
+
+One of the main features of the data used with HMMs is that locations are taken at regular time steps and that there are negligible position error. So for example, HMMs are adequate to use on GPS tags that take locations at a set temporal frequency (e.g. every 2 hrs). Without reprocessing, HMMs are not particularly good for irregular times series of locations or locations with large measurement error (e.g. you would need to preprocess Argos data before applying HMMs).
+
+I work mainly on aquatic species, and unfortunately, movement of aquatic species is rarely taken at regular time intervals and without measurement error. For example, the data set we will work on, is the movement track of a grey seal tagged with a Fastlock GPS tag. This is a subset of the data set used in the paper from Whoriskey et al. 2017 (\url{ https://onlinelibrary.wiley.com/doi/abs/10.1002/ece3.2795}), which applies a set of different HMMs to the movement data of various aquatic species. The original dataset is available in the online supplementary information.
+
+Let's read the data file and peak at it.
+
+<<sealData>>=
+# Make sure you are in the good directory!
+seal <- read.csv("seal.csv", stringsAsFactors = FALSE)
+# Look at the data
+head(seal)
+@
+
+The files has three columns: \emph{date} with the date and time, \emph{lon} with the longitude, and \emph{lat} with latitude. It's clear from the \emph{date} column that the locations are taken at irregular time intervals. So just like in Whoriskey et al. 2017, we will regularize it. Note, that \texttt{momentuHMM} has functions to preprocess irregular movement time series and/or time series with large measurement errors (e.g. \texttt{crawlWrap}). However, these functions are much more complex, they fit state-space models to the data, and we will not cover these in this tutorial. Some of the material covered in the state-space model tutorial will help understand these functions, but you can also see the vignette of \texttt{momentuHMM} to learn more about the preprocessing functions available. For now, as in Whoriskey et al. 2017, we will assume that the animal moves in a straight line and at constant speed between two locations and interpolate the location at regular time intervals based this assumption. Note that this kind of interpolation may not be adequate in many circumstances and see activities to investigate the effects of the choice of the time interval on the analysis. 
+
+% Change to 3 hrs?
+
+<<regulerasing>>=
+# First, let's transform the date/time info into a proper time format
+seal$date <- as.POSIXct(seal$date, format="%Y-%m-%d %H:%M:%S", tz="GMT")
+
+# Let's find the most appropriate time interval
+# Calculate the time intervals
+tint <- as.numeric(diff(seal$date), units="hours")
+# Let's look at the time intervals
+summary(tint)
+plot(tint, ylab= "Time interval (hr)", pch=19, cex=0.5, las=1)
+# Let's go for 2 hrs,
+# look at the activities to see the effect of this choice
+
+# Regularising
+# Create a 2hr sequence (2*60*60) from the first time to the last time
+ti <- seq(seal$date[1], seal$date[length(seal$date)], by=2*60*60)
+head(ti)
+# Interpolate the location at the times from the sequence
+iLoc <- as.data.frame(cbind(lon=approx(seal$date, seal$lon, xout = ti)$y,
+              lat=approx(seal$date, seal$lat, xout = ti)$y))
+# Create a new object that has the regular time and interpolated locations
+sealreg <- cbind(date=ti, iLoc)
+head(sealreg)
+
+# Quickly plot the regularized locations 
+plot(sealreg$lon, sealreg$lat, pch=19, cex=0.5, xlab="Lon", ylab="Lat", las=1)
+# Add the original data
+points(seal$lon, seal$lat, pch=19, cex=0.5, col=rgb(1,0,0,0.5))
+@
+
+Ok, we have now a regular time series of locations. 
+
+For the most basic movement HMMs, you need to transform the time series of locations into two time-series: one which represents the step lengths (distance between two locations) and one that represents the turning angle (angle between two steps). The package \texttt{momentuHMM} has a function that does that: \texttt{prepData}. The data is in latitude and longitude and I'm assuming using WGS84. You can use \texttt{prepData} on latitude and longitude data \footnote{ in which case it will calculate the step length using \texttt{spDistN1} of the package \texttt{sp} and will calculate the turning angle based on the initial bearing using the function \texttt{bearings} from the package \texttt{geosphere}} or on projected data (e.g. UTM). \texttt{prepData} can do much more, and we will see some other features later, but for now the arguments that we need to think about are:
+\begin{itemize}
+\item \texttt{type}: whether it's easting/northing coordinate system (\texttt{type="UTM"}) or whether it's longitude/latitude (\texttt{type = "LL"}). We are using \texttt{"LL"}.
+\item \texttt{"coordNames"}: the names of the columns with the coordinates. So in our case \emph{lon} and \emph{lat}.
+\end{itemize}
+
+<<prepData>>=
+# Preparing the data: 
+# here mainly calculating step lengths and turning angles
+sealPrep <- prepData(sealreg, type="LL", coordNames = c("lon", "lat"))
+
+# Let's peak at the data
+head(sealPrep)
+# What kind of object is this?
+class(sealPrep)
+@
+
+If we take a quick look at the data, we can see that the step lengths (column \emph{step}) and angles (column \emph{angle}) have been calculated and that the names of the columns with the coordinates are now \emph{x} and \emph{y}, rather than \emph{lon} and \emph{lat}. We also have a new column: \texttt{ID}. In cases where you have multiple individuals, you would want your original data to have an \emph{ID} column before being imputed in the \texttt{prepData} column.
+
+Note that the object it returns is from a specific S3 class defined in the \texttt{momentuHMM} package. This means that we can apply generic functions like \texttt{plot} to it and it will return specified outputs.
+
+<<GeneralPlot>>=
+plot(sealPrep)
+@
+
+We can see the track of the animal and the times series of the step lengths and turning angles, as well as the histograms of the step lengths and turning angles. Can you already identify patterns?
+
+\section{Fitting the HMM}
+
+Now that our data is ready to use, we can fit the HMM. For this we use the function \texttt{fitHMM}. This is where we need to make many of our modelling decisions and most of these decisions will be associated with one of the arguments of the function.
+
+First, when we fit a HMM, we need to decide the number of behavioural states we are going to model. To start simple, we will only use only two behavioural states. These could be, for example, representing one behaviour with fast and directed movement (e.g. travelling) and one behaviour with a more slow and tortuous movement (e.g. foraging). This mean that the argument \texttt{nbState} will be set to 2.
+
+Second, we need to decide whether we make the transition probabilities between the behavioural states dependent on covariates. Here again, we will start simple and we will not use covariates. That means that our \texttt{formula} argument will be \texttt{$\sim$1}.
+
+Third, we need to select the distribution we will use to model the step lengths and the one we will use to model the turning angles. For now, we will use the gamma distribution for the step length and the von Mises for the turning angles. This means that the argument \texttt{dist} will be set to: \texttt{list(step="gamma", angle="vm")}. Note that \texttt{dist} should be a list with an item for each data stream columns in the data that we are modelling (so here the column \emph{step} and \emph{angle}).
+
+The gamma distribution is strictly positive (i.e. it does not allow for 0s). If you have step lengths that are exactly zero in your data set, you need to use zero-inflated distributions. But in this case, we have no zeros. Let's check.
+
+<<CheckForZeros>>=
+sum(sealPrep$step == 0, na.rm = TRUE)
+@
+
+We are ok. We can ignore the zero-inflation.
+
+By default, \texttt{fitHMM} will set the argument \texttt{estAngleMean} to \texttt{NULL}, which means that we assume that the mean angle is 0 for both behaviours (i.e. the animal has a tendency to continue in the same direction) and that only the angle concentration parameters differ. The concentration parameters control the extent to which the animal continues forward versus turn. Doing so reduces the number of parameters to estimate.
+
+These are all very important decisions that you must make when you construct your model.
+
+In addition, we need to specify initial values for the parameters to estimate. The HMMs are fitted using maximum likelihood estimate (MLE) with a numerical optimizer. An unfortunate aspect of fitting models using numerical optimizers, is that, to be able to explore the parameter space and find the best parameter values for the model, the optimizer needs to start somewhere. You need to decide where it starts. Unfortunately, choosing bad starting values can result in parameter estimates that are not the MLE, but just a local maximum. To choose your initial parameter you can take a quick peak at the data (e.g. using the plots above) and use some general biological information. For example, it's common for animals to have one behaviour with long step lengths and small turning angles and one behaviour with short step lengths and larger turning angles. From the plots above, it looks like the animal has step lengths that are close to 0, 3, 7. As I see it, there are probably three behaviours with different mean step lengths around these values.
+
+<<SLguesses>>=
+plot(sealPrep$step~sealPrep$date, ty="l", 
+     ylab = "Step length", xlab="Date", las=1)
+abline(h=0, col=rgb(1,0,0,0.5))
+abline(h=3, col=rgb(1,0,0,0.5))
+abline(h=7, col=rgb(1,0,0,0.5))
+@
+
+So let's choose 3 and 7 for the means step lengths and use the same values for the standard deviations. The turning angles are either very close to 0 or pretty spread from $-\pi$ to $\pi$. High concentration parameter values ($\kappa$, said kappa) mean that the animal has a tendency to move in the same direction. Values close to 0 mean that the turning angle distribution is almost uniform (the animal turns in all directions). Note that $\kappa$ cannot be exactly 0, so let's choose 0.1 and 1.
+
+<<par0>>=
+# Setting up the starting values
+mu0 <- c(3, 7) # Mean step length
+sigma0 <- c(3, 7) # Sd of the step length
+kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
+@
+
+Ok, were are ready. Let's fit the HMM\footnote{If you have loaded the package \texttt{moveHMM} instead of \texttt{momentuHMM}, you will run into problems. While these two packages are similar and build on each other, they do not have the same arguments for some of the functions.}. 
+
+<<fitHMM, cache=TRUE>>=
+# Fit a 2 state HMM
+sealHMM2s <- fitHMM(sealPrep, 
+                    nbState = 2, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu0,sigma0), angle=kappa0),
+                    formula = ~1)
+@
+
+Let's explore the results.
+<<hmm2s>>=
+# Let's look at parameter estimates
+sealHMM2s
+# Let's plot it
+plot(sealHMM2s)
+@
+
+Based on the mean step parameters, it looks like the first behavioural state  (\texttt{state 1}) has really small step lengths compare to \texttt{state 2}. This is particularly easy to see in the step histogram, where the  estimated distribution for each state is overlaid on top of the observed step length frequencies. Surprisingly, the turning angle distributions of the two states both indicate directed movement. In fact, the concentration parameter of \texttt{state 1} is bigger than that of \texttt{state} 2. In the figure with the track, it looks like if we only have \texttt{state} 2. This is strange, since the transition probabilities estimated indicate that the animal remain in each behaviour for multiple steps (diagonal values of the transition probability matrix are $>0.5$).
+
+What's happening?
+
+\section{Identifying behavioural states}
+
+Maybe looking at the state sequence in more detail will help us understand. Actually, we are interested in identifying when an animal is in each of the behavioural states (here when the animal is in state 1 vs state 2), something we call state decoding. To do so, we can use the function \texttt{viterbi}, which uses the Viterbi algorithm to produce the most likely sequence of states according to your fitted model and data.
+
+<<Viterbi, cache=TRUE>>=
+# Apply the Viterbi algorithm using your fited model object
+sealStates <- viterbi(sealHMM2s)
+# Let's look at predicted states of the first 20 time steps
+head(sealStates, 20)
+# How many locations in each state do we have?
+table(sealStates)
+@
+
+So they are some \texttt{state} 1, we are just not seeing them! 
+
+In many cases, it is more interesting to get the probability of being in each state rather than the most likely state. To do so, you can use the function \texttt{stateProbs}, which returns a matrix of the probability of being in each state for each time step.
+
+<<stateProbs, cache=TRUE>>=
+# Calculate the probability of being in each state
+sealProbs <- stateProbs(sealHMM2s)
+# Let's look at the state probability matrix
+head(sealProbs)
+@
+
+We can see here the probability of being in both states for the first 6 time steps. Here, the probability of being in \texttt{state} 1 is really high for these steps, but that may not always be the case. Sometimes you might have values closer to 0.5, which would indicate that for that time step, it's hard to identify which state you are in (i.e. which step length and turning angle distributions fit best).
+
+You can plot the results from both of these functions using the function \texttt{plotStates}.
+
+<<plotStates, cache=TRUE>>=
+plotStates(sealHMM2s)
+@
+
+We clearly have two behavioural states. The steps from \texttt{state} 1 are just too small for us to see them in the track.
+
+\section{But do we have a good model?}
+
+This is all great, but is this a good model for our data? 
+
+\subsection{Starting values: should we care?}
+
+The first thing we need to look into is whether the parameter estimates are reliable. As I mentioned above, the initial parameter values can affect the estimating procedures. So it's always good to check if you get similar results with different starting values. Here, we will make the starting values of the two behavioural states closer to one another.
+
+<<par02, cache=TRUE>>=
+# Setting up the starting values (more similar values)
+mu02 <- c(5, 7) # Mean step length
+sigma02 <- c(5, 7) # Sd of the step length
+kappa02 <- c(1, 1) # Turning angle concentration parameter (kappa > 0)
+
+# Fit the same 2 state HMM
+sealHMM2s2 <- fitHMM(sealPrep, 
+                    nbState = 2, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu02, sigma02), angle=kappa02))
+@
+
+Let's compare the two results. First let's look at which of the two has the lowest negative log likelihood (equivalent of highest log likelihood, so closer to the real MLE). Let's look also at the parameter estimates they each returned.
+
+<<Compare0>>=
+# Negative log likelihood
+c(original = sealHMM2s$mod$minimum, new = sealHMM2s2$mod$minimum)
+
+# Parameter estimates
+cbind(sealHMM2s$mle$step, sealHMM2s2$mle$step)
+cbind(sealHMM2s$mle$angle, sealHMM2s2$mle$angle)
+cbind(sealHMM2s$mle$gamma, sealHMM2s2$mle$gamma)
+@
+
+Looks like they both returned very close values for everything. So that's good! The function \texttt{fitHMM} also has the argument \texttt{retryFits} which perturbs the parameter estimates and retry fitting the model. The argument is used to indicate the number of times you want perturb the parameters and retry fitting the model\footnote{you can choose the size of the perturbation by setting the argument \texttt{retrySD}}.
+
+Let's try (this will take a few minutes).
+
+<<retryFit, cache=TRUE>>=
+# Fit the same 2-state HMM with retryFits
+# This is a random pertubation, so setting the seed to get the same results
+set.seed(1234) 
+sealHMM2sRF <- fitHMM(sealPrep, 
+                    nbState = 2, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu02, sigma02), angle=kappa02),
+                    retryFits=10)
+@
+
+Let's compare the results again.
+
+<<Compare0rf>>=
+# Negative log likelihood
+c(original = sealHMM2s$mod$minimum, new = sealHMM2s2$mod$minimum,
+  retryFits = sealHMM2sRF$mod$minimum)
+
+# Parameter estimates
+cbind(sealHMM2s$mle$step, sealHMM2s2$mle$step, sealHMM2sRF$mle$step)
+cbind(sealHMM2s$mle$angle, sealHMM2s2$mle$angle, sealHMM2sRF$mle$angle)
+cbind(sealHMM2s$mle$gamma, sealHMM2s2$mle$gamma, sealHMM2sRF$mle$gamma)
+@
+
+Still looking very similar!
+
+But let's choose some wild starting values to see the type of problems we might run into.
+
+<<fitHMM3, cache=TRUE>>=
+# Setting wild starting values
+mu0W <- c(5, 100) # Mean step length
+sigma0W <- c(5, 0.1) # Sd of the step length
+kappa0W <- c(10, 0.01) # Turning angle concentration parameter (kappa > 0)
+sealHMM2sW <- fitHMM(sealPrep, nbState = 2, 
+                     dist=list(step="gamma", angle="vm"), 
+                     Par0 = list(step=c(mu0W,sigma0W), angle=kappa0W))
+
+@
+
+Let's compare the negative log likelihood (note that we want the minimum value here to get the MLE) and parameter estimates.
+
+<<Compare0rw>>=
+# Negative log likelihood
+c(original = sealHMM2s$mod$minimum, wild=sealHMM2sW$mod$minimum)
+
+# Parameter estimates
+cbind(sealHMM2s$mle$step, sealHMM2sW$mle$step)
+cbind(sealHMM2s$mle$angle, sealHMM2sW$mle$angle)
+cbind(sealHMM2s$mle$gamma, sealHMM2sW$mle$gamma)
+@
+
+The negative log likelihood here is much larger than the negative log likelihood of the model fitted with the sensible starting values. Note also that some of the parameter estimates are exactly the same values as the initial values, which is always a sign of optimization problems. These are all signs that the model fitted with this new set of starting values is not good. Sometimes, you will get error messages saying that \texttt{nlm} or \texttt{optim}, the functions that minimize the negative log likelihood, did not converged or that non-finite values were supplied to them. Sometimes, you might not be able to plot the data or get the states. These are also signs that the starting values are poor or that the model is not good for your data. 
+
+We will see later, that the package \texttt{momentuHMM} has functions to help selecting initial parameters for complex models. However, these functions rely on the user choosing initial parameter values for a simple model like the one we just explored.
+
+\subsection{Pseudo-residuals}
+
+Ok, we fitted a model to data, looks like the parameter estimates are reliable, and we can get state probabilities, but is this a good model for our data? Can we use the model results? The best way to investigate model fit is through pseudo-residuals. Pseudo-residuals are a type of model residuals that account for the interdependence of observations. They are calculated for each of the time series (e.g. you will have pseudo-residuals for the step length time series and for the turning angle time series). If the fitted model is appropriate, the pseudo-residuals produced by the functions \texttt{pseudoRes} should follow a standard normal distribution. You can look at pseudo-residuals directly via the function \texttt{plotPR}, which plots the pseudo-residual times-series, the qq-plots, and the autocorrelation functions (ACF).
+
+<<pseudoRes>>=
+plotPR(sealHMM2s)
+@
+
+Both the qq-plot and the ACF plot indicate that the model does not fit the step length time series particularly well. The ACF indicates that there is severe autocorrelation remaining in the time series, even after accounting for the persistence in the underlying behavioural states. 
+
+This could indicate that there is more hidden behavioural states. Let's try a 3-state HMMs.
+
+<<hmm3s, cache=TRUE>>=
+# Setting up the starting values (we need 3 now, because 3 states)
+mu03s <- c(0.1, 3, 7) # Mean step length
+sigma03s <- c(0.1, 3, 7) # Sd of the step length
+kappa03s <- c(0.1, 1, 1) # Turning angle concentration parameter
+
+# Fit a 3 state HMM
+sealHMM3s <- fitHMM(sealPrep, 
+                    nbState = 3, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu03s, sigma03s), angle=kappa03s))
+@
+
+Let's look at it and at the pseudo-residuals.
+
+<<threeStates, message=FALSE>>=
+plot(sealHMM3s)
+plotStates(sealHMM3s)
+plotPR(sealHMM3s)
+@
+
+Ah, that's better. Not perfect, but less unexplained autocorrelation, especially in the step lengths. Some of the unexplained autocorrelation in the turning angles is related to the method we used to get location estimates at regular time intervals, see activities to explore this a bit more in depth. If we look at the step length distribution, we can see that we have still our state with really small steps (maybe resting?), a state with steps of medium size (maybe foraging?), and a state with large steps (maybe travelling?). Looking at the track, it does look like the movement in state 2 is more tortuous and in focal areas, while the movement in state 3 is very directed and span larger areas. 
+
+\subsection{Simulating data}
+
+We can also use the function \texttt{simData} to look at whether the movement produce by the models is similar to the observed movement.
+
+Let's simulate the 3-state HMMs, and then fit it to be able to identify the behavioural states. Note that we could just plot directly the simulated data, rather than estimating the fitting the model and predicting the states. This might require a bit of fiddling\footnote{A good thing to know is that the colour paletter used by the packages is: \texttt{c("\#E69F00", "\#56B4E9", "\#009E73", "\#F0E442", "\#0072B2", "\#D55E00", "\#CC79A7")}}. One way fitting the model to the simulated data may be useful is in identifying whether you have enough data to estimate your parameters accurately.
+
+<<simData, cache=TRUE>>=
+# Simulate the model
+sealSim <- simData(model=sealHMM3s, nbAnimals =1, states = TRUE)
+# Fit the model to the simulated data
+sealSimFit <- fitHMM(sealSim, 
+                    nbState = 3, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu03s, sigma03s), angle=kappa03s))
+# Plot the results
+plot(sealSimFit)
+# Compared the parameter estimates
+sealSimFit
+sealHMM3s
+@
+
+Looks similar, except maybe that the real seal goes back and forth to some of the same locations, something not captured in the simulation. The parameter estimates are closed to those used to simulate the data, which is good.
+
+\subsection{Confidence intervals}
+
+We can look at the confidence intervals for the parameter estimates. This does not necessarily give us an idea of whether the model is good or not, but it helps us understand whether the behavioural states have different movement characteristics. To compute the confidence intervals, we can use the function \texttt{CIreal}.
+
+%%LOOK INTO CIbeta!
+For example, let's look the step length mean parameters.
+
+<<ci>>=
+# Caculate the CIs
+sealCI <- CIreal(sealHMM3s)
+# Let's look at the step lenth CIs
+rbind(lower=sealCI$step$lower["mean",],
+      upper = sealCI$step$upper["mean",])
+@
+
+We can see that the 95\% confidence intervals of mean step length does not overlap for the three states, indicating that, in term of step lengths, they vary quite a bit.
+
+\section{Understanding the factors that affect movement: including covariates}
+
+\texttt{momentuHMM} allows you to incorporate various covariates in the model in many different ways, which allows you to understand how covariates affect the behaviour and  movement of the animal. There are so many different options (including activity centers, spatial covariates, etc), that it's impossible to look at them all here. Here are a few examples.
+
+
+\subsection{Spatial covariates}
+
+One of the most exciting aspect of \texttt{momentuHMM} is that you can incorporate spatial covariates that are kept in a raster file. Here we will use a raster that contains the bathymetry in the area of the seal. I created this file using the package \texttt{marmap}. To read the file you need the function \texttt{raster} from the package with the same name.
+
+Let's read the file and plot it.
+
+<<readRaster>>=
+# Read the raster
+bathy <- raster("bathy.grd")
+# Let's plot the bathymethy raster
+plot(bathy)
+@
+
+This represents the bathymetry in meters. Any value above 0 is on land.
+
+Here we will use the function \texttt{prepData} again, but this time including the raster as a spatial covariate. The function will extract the raster values at the seal locations. Off course for this to work the spatial covariate raster needs to be in the same projection as the movement data. It's the case here.
+
+<<extraxtCovs>>=
+sealPrep <- prepData(sealreg, type="LL", coordNames = c("lon", "lat"), 
+                     spatialCovs = list(bathy=bathy))
+head(sealPrep)
+@
+
+Now our \emph{sealPrep} object has a new column with the bathymetry value at that location.
+
+There are two ways in which the bathymetry can influence the movement of the animal. It can influence the behavioural state the animal is in or it can influence the movement characteristics in some of the state (e.g. change the mean step length value in one of the behavioural states).
+
+Let's explore the first option. So here we are assuming that the probability to switch between behavioural states is affected by the bathymetry. Because of the way the HMMs are constructed, we have to estimate one more parameter per switching probability ($\gamma_{ij}$ said gamma i j), excluding the probability of remaining in the same state, which can be deducted based on the switching probabilities. Please see the mathy section below to understand the details. So if $N$ represents the number of states, it means you need to estimate $N(N-1)$ new parameters. So for an HMM with 3 states, we would estimate 6 new parameters.
+
+The main argument of the \texttt{fitHMM} function that we need to change are the \texttt{formula} and the starting values (because we have 6 new parameters to estimate). The default value for the \texttt{formula} is $\sim 1$, which means that the transition probability are not affected by covariates. Here, we want to indicate that the transition probability are affected by the bathymetry. We can use the function \texttt{getPar0} to help us find starting values based on our simpler 3-state HMMs. This might be a bit of an overkill for this model, as \texttt{getPar0} will set the starting values for the covariate effects on the transition probabilities to 0. But it can make a small difference to use good starting values for the other parameters (might be woth looking if it makes indeed a difference). Note that to be able to use \texttt{getPar0} in this case, we have to refit the simpler model with the new data that has the bathymetry data.
+
+<<bathyBeh, cache=TRUE>>=
+# New formula
+bathyForm <- ~bathy
+
+# Refit the simple 3-states HMM - so it's associated with the data with bathymetry
+sealHMM3s <- fitHMM(sealPrep, 
+                    nbState = 3, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu03s, sigma03s), angle=kappa03s))
+
+# Get new starting values based on simpler model, here the 3-states HMM
+par0b <- getPar0(model=sealHMM3s, formula=bathyForm)
+# Look at the starting values
+par0b
+
+# Now we fit the new model with bathymetry
+sealHMMb <- fitHMM(sealPrep, nbState = 3, 
+                   dist=list(step="gamma", angle="vm"), 
+                   Par0 = par0b$Par, beta0=par0b$beta, 
+                   formula=bathyForm)
+
+sealHMMb
+@
+
+The first thing to note is that the model now has a new row of parameters in the section \texttt{Regression coeffs for the transition probabilities}. This row represents the effects of bathymetry on the transition probabilities. A positive value means that increasing values of the covariate increase the switching  probability, while a negative value means the reverse relationship. So for example, as bathymetry increases, the probability of switching from state 1 to state 2 only slightly increases, but the probability of switching from state 3 to state 1 increases much more. Note that the relationship between these coefficients and the final transition probabilities are dependent on each other and on the intercept, see math section for details. Keep in mind here that bathymetry is represented in negative values, so as bathymetry value increases the seal is in shallower water. 
+
+The row with the intercept represents the base probabilities before we incorporate the bathymetry effects. In model without covariates, you would only get the intercept values and would use them alone to calculate the transition probabilities, see the math section below for more details.
+
+Let's look at it visually.
+%, first by using the generic \texttt{plot} function and, then, by using the function \texttt{plotStationary}, which plots the stationary state probabilities.
+
+<<plotBathy>>=
+plot(sealHMMb)
+@
+
+%plotStationary(sealHMMb)
+
+We can see that the bathymetry mainly affects the transition probability in high bathymetry values (so, close/on land). One of the most obvious patterns is that it increases the probability of switching to state 1 from both states 2 and 3 and decreases the probability of staying in state 2 and staying in state 3. Remember, state 1 is associated with the very small step lengths. This is likely seal hauling out on land or resting in shallow waters! In fact, one of the places where we have a lot of state 1 is on small islands, where I'm pretty sure they are known to haul out.
+
+Here a quick plot to convince you.
+
+<<plotBathyWithBathy>>=
+# Create a new file, so we can see land better
+water <- bathy
+water[water >= 0] <- NA
+# Create color ramp to show bathymetry in blue gradients
+bluePal <- colorRampPalette(c(rgb(0,0,1), rgb(0.9,0.9,1)))
+plot(water, col=bluePal(50))
+
+# Let's plot only the state 1
+points(sealPrep[viterbi(sealHMMb) == 1, c("x","y")], 
+       col="#E69F00",
+       pch=19)
+@
+
+Ok, but it is a better model?
+
+<<bathyAIC>>=
+AIC(sealHMM3s, sealHMMb)
+@
+
+Yes.
+
+What about the pseudo-residuals?
+
+<<bathyPR>>=
+plotPR(sealHMM3s)
+@
+
+Still some issues, but not too too bad.
+
+\subsection{Non spatial covariates}
+
+Could there be diurnal patterns explaining the autocorrelation in turning angles? We are not limited to incorporate spatial covariates. We can incorporate any covariates as long as we can relate each of the locations to a covariate value (that's in essence what the \texttt{prepData} function does for the spatial covariates).
+
+So here we are going to create a new column that keeps track of the hour of the day for each observation. We are going to set it in the time zone where the seals are.
+
+<<CreateTimeCov>>=
+sealPrep$hour <- as.integer(strftime(sealPrep$date, format = "%H", tz="Etc/GMT+4"))
+@
+
+Here again we can make the covariate affect the transition probabilities. The difference, is that we have to use a more complex function that represents the cyclical nature of time of day. This is the \texttt{cosinor} function. For more information on the \texttt{cosinor} function, see mathy section below.
+
+<<diurnal, cache=TRUE>>=
+# New formula that says that the transition probabilties are affected by the time of day
+diurnForm <- ~ cosinor(hour, period = 24)
+
+# Refit model with new data
+sealHMM3s <- fitHMM(sealPrep, 
+                    nbState = 3, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu03s, sigma03s), angle=kappa03s))
+
+# Get initial parameters
+par0diurn <- getPar0(model=sealHMM3s, formula=diurnForm)
+
+# Now we fit the diurnal model with the starting values returned by getPar0
+sealHMMdiurn <- fitHMM(sealPrep,nbState = 3, 
+                   dist=list(step="gamma", angle="vm"), 
+                   Par0 = par0diurn$Par, beta0=par0diurn$beta, 
+                   formula=diurnForm)
+
+
+# Let's look at the results
+sealHMMdiurn
+plot(sealHMMdiurn)
+AIC(sealHMMb, sealHMMdiurn)
+@
+
+I'm not a 100\% sure how to interpret the results biologically. But again it appears to be affecting state 1, which is likely resting. According to AIC it's less good than the bathymetry model.
+
+To help understand the relationship further we can also use the function \texttt{plotStationary}, which display the relationship between the covariate and the stationary probability of being in each state rather than the relationship between the covariates and the switching probability.
+
+<<plotStationary>>=
+plotStationary(sealHMMdiurn)
+@
+
+So it looks like there is a higher probability of being in state 2 (the foraging type of behaviour) at night and a peak in each of the other behaviours during different period of the day.
+
+% Ask kim if the data is in UTC?
+
+Covariates can affect the state-dependent movement, by which I mean the characteristics of the movement in a given state. So for example, the animal might make all the behaviours at night and during the day, but at night it might do them with smaller steps. Here, we are going to look at whether the seal is more or less directed at night. To do this, we are going to change the argument \texttt{DM}. For this kind of model, it's particular useful to use \texttt{getPar0}, because it helps set starting values for the parameters associated with the effects of covariates on the movement parameters.
+
+<<diurnalDM, cache=TRUE>>=
+# Use the formula to describe the changes in the design matrix
+diurnDM <- list(angle = list(concentration = ~ cosinor(hour, period = 24)))
+
+# Get parameter starting values
+par0diurnDM <- getPar0(model=sealHMM3s, DM=diurnDM)
+# Look at starting values
+par0diurnDM
+
+# Now we fit the new diurnal model with the starting values returned by getPar0
+sealHMMdiurnDM <- fitHMM(sealPrep, nbState = 3, 
+                        dist=list(step="gamma", angle="vm"), 
+                        Par0 = par0diurnDM$Par, beta0=par0diurnDM$beta, 
+                        DM=diurnDM)
+
+
+# Let's look at the results
+sealHMMdiurnDM
+plot(sealHMMdiurnDM, plotCI=TRUE)
+AIC(sealHMMb, sealHMMdiurn, sealHMMdiurnDM)
+@
+
+% could add plitCI above too, and discuss it.
+
+So here it looks like the seal makes more directed movement in state 1 at night, makes more directed movement in state 2 early in the morning, and makes more directed movement in state 3 early in the morning.
+
+Note that we can combine various covariates. For example, here we are going to combine bathymetry and time of day.
+
+<<BathydiurnalDM, cache=TRUE>>=
+# Get parameter starting values
+par0bd <- getPar0(model=sealHMM3s, formula=bathyForm, DM=diurnDM)
+
+# Now we fit the new model with the starting values returned by getPar0
+sealHMMbd <- fitHMM(sealPrep, nbState = 3, 
+                        dist=list(step="gamma", angle="vm"), 
+                        Par0 = par0bd$Par, beta0=par0bd$beta, 
+                        formula=bathyForm, 
+                        DM=diurnDM)
+
+
+# Let's look at the results
+sealHMMbd
+plot(sealHMMbd)
+AIC(sealHMMb, sealHMMdiurn, sealHMMdiurnDM, sealHMMbd)
+plotPR(sealHMMbd)
+@
+
+While this combined model is better, given the complexity, I think I would stick to the bathymetry model for the moment and look into better ways to try to explain the data, especially since incorporating the time of day doesn't fix the angle pseudo-residual problem.
+
+This is where we stop the main tutorial. There are two other sections below. One that describes some of the mathematical details and one with activities that you can do on your own to further explore HMMs. 
+
+\section{For the statistically/mathematically inclined}
+
+One of the most exciting aspect of the \texttt{momentuHMM} package is that you can incorporate the potential effects of environmental covariates on the probability of switching behavioural states. To understand how the covariates can affect the behaviour, it's useful to spend time understanding the transition probabilities. This section is a bit more technical, but I think is needed to fully understand what the estimated covariate relationships mean.
+
+If you have a model that has two behavioural states (state 1 and 2) and no covariates, you would have a transition probability matrix like this:
+
+\begin{equation}
+\mathbf{\Gamma} =
+\begin{pmatrix}
+\gamma_{11} & \gamma_{12}\\
+\gamma_{21} & \gamma_{22}
+\end{pmatrix}
+\end{equation},
+
+where $\gamma_{ij}$ represent the probability of switching from i to j. For example, $\gamma_{11}$ represents the probability of staying in state 1 if you are already in state 1. Similarly, $\gamma_{12}$ represents the probability of switching to state 2 if you are in state 1. By definition the row entries need to sum to 1. Which simply means that if you are in state 1 at time $t-1$ you will end up in a state at time $t$ (i.e. you don't go in behavioural limbo).
+
+Let's look again at the transition probability matrix that was estimated in our seal example.
+
+<<tpm>>=
+sealHMM2s
+@
+
+We can see that the probability of switching in state 2 if you are in state 1 is \Sexpr{round(sealHMM2s$mle$gamma[1,2],2)} and so the probability of staying in state 1 is \Sexpr{1-round(sealHMM2s$mle$gamma[1,2],2)} $=$ \Sexpr{round(sealHMM2s$mle$gamma[1,1],2)}. The same logic applies to the probability of staying or switching from state 2. This means that for a model with $N$ behavioural states, we only need to estimate $N (N-1)$ transition probabilities (so 2 for the example here), because for each state at time $t-1$ we will be able to calculate one of the transition probabilities based on the difference with the sum of the transition probabilities estimated (so here we can deduce $\gamma_{11}$ based on $\gamma_{12}$).
+
+To incorporate the covariates we are saying that the transition probabilities are changing through time as a function of the covariate values at that time step. Specifically,
+
+\begin{equation}
+\label{linkFx}
+\gamma^{(t)}_{ij} = \frac{\exp(\eta_{ijt})}{\sum^N_{k=1}\exp(\eta_{ikt})},
+\end{equation}
+
+where
+
+\begin{equation}
+\label{covRel}
+\eta_{ijt} =
+\begin{cases}
+\beta_{0ij} + \sum^p_{l=1} \beta_{lij} w_{lt} & \text{if} \ i \neq j,\\
+0, & \text{otherwise},
+\end{cases}
+\end{equation}
+
+where $w_{lt}$ is the $l$-th covariate at time $t$ and $p$ is the number of covariates considered. The equation \ref{linkFx} is only a link function to insure that the transitions probabilities are between 0 and 1 and that the row sum to 1. The important relationship between the covariates and the transition probabilities are in equation \ref{covRel}, where the $\beta_{0ij}$ is the base transition probability for the switch from state $i$ to state $j$ that is not affected by the covariates. The $\beta_{lij}$ are the coefficient relating the transition probability to the $l$-th covariate. Note that $\eta_{ii}$ (the probability of staying in state $i$, the diagonal values in the transition probability matrix) are fixed to 0 because we only want to $N (N-1)$ transition probabilities to be estimated and the row sums to one.
+
+So in a model with no covariates, only the $\beta_{0ij}$ for $i \neq j$ (switching probabilities from state $i$ to another state $j$) are estimated. If you look in the code box above you'll see that we only have \emph{regression coeffs for the transition probabilities} for 1 $->$ 2 and 2 $->$ 1, and that the transition probabilities for corresponding states are $\gamma_{ij} = \frac{\exp(\eta_{ij})}{\sum^N_{k=1}\exp(\eta_{ik})}$. 
+
+For example, for the transition probability from state 1 to state 2.
+
+<<beta>>=
+# gamma_{12}
+sealHMM2s$mle$gamma[1,2]
+# gamma_{12} calculated based on the equations above
+exp(sealHMM2s$mle$beta[1])/(exp(0)+exp(sealHMM2s$mle$beta[1]))
+@
+
+So the way we interpret the $\beta$ values, is that if they are positive, it means that they increase the transition probability.  Since the total value of $\eta$ is what affects the transition probability, the magnitude and sign of the intercept ($\beta_0$) will affect when the transition probability goes from above or below 0.5.
+
+This is a great way to incorporate covariates, but it means that it add $N(N-1)$ parameters to your model, where $N$ is the number of states. So if you have many behavioural states, it will results in a very complex model.
+
+\subsection{cosinor}
+
+The function \texttt{cosinor} internally creates the covariates cos$(2 \pi \; \text{value}/\text{period})$ and sin$(2 \pi \; \text{value}/\text{period})$. So for example cos$(2 \pi \; \text{hour}/24)$.
+
+
+<<cosinor>>=
+plot(cos(2*pi*(1:24)/24), pch=19, ylab="cosinorCos", xlab="Time of day")
+@
+
+<<cosinor2>>=
+plot(sin(2*pi*(1:24)/24), pch=19, ylab="cosinorSin", xlab="Time of day")
+@
+
+% WOULD NOT PUT THAT MUCH FAITH IN INITIAL DIST ESTIMATE (ASSUME BY DEFAULT THAT NON-STATIONARY)
+% 
+% TO DO: standardize?
+% 
+% TO DO: model selection, AIC, think Ben Bolker, model complexity.
+% 
+% TO DO: use known states
+% 
+
+
+\section{Activities}
+
+\subsection{Try it on your own data}
+
+Give it a try on your own data! If you don't have data try the other activities.
+
+\subsection{Activity centers}
+
+This is fun but could be hard. Skip to the next activity if you find the material challenging.
+
+Let's look whether adding bathymetry improved the simulations. Here, it's easy to have some problem, where the animal moves outside of the raster. So to help, we are setting the initial position as the initial position observed. We are also limiting the simulation to a time series of 200 steps. We are also setting the seed, because the animal will often wonder off map by chance. 
+
+<<simBathy, cache=TRUE>>=
+set.seed(1)
+sealSimB <- simData(model=sealHMMb, nbAnimals =1, spatialCovs = list(bathy=bathy),
+                    initialPosition = as.matrix(sealreg[1,c("lon","lat")]),
+                    obsPerAnimal = 200)
+sealSimFitB <- fitHMM(sealSimB, 
+                    nbState = 3, 
+                   dist=list(step="gamma", angle="vm"), 
+                   Par0 = par0b$Par, beta0=par0b$beta, 
+                   formula=bathyForm)
+
+# Plot simulation
+plot(water, col=bluePal(50))
+points(sealSimB[,c("x","y")], 
+       col=c("#E69F00", "#56B4E9", "#009E73")[viterbi(sealHMMb)], 
+       pch=19, cex=0.5)
+@
+
+I'm not sure. The animal definitely wonders off in regions we wouldn't expect it to go. But the state 1 is only in shallow waters.
+
+Look at the \texttt{momentuHMM} vignette and see whether you can include activity centers.
+
+\subsection{Modelling step length and turning angles}
+
+You can model the observations with a set of different distributions. To change the distribution simply requires changing the argument \texttt{dist} in the function \texttt{fitHMM}. In the example above, we used the gamma distribution (using the name \texttt{"gamma"}) for the step length. However, you can use a variety of alternative distribution, including: Weibull (\texttt{"weibull"}) and exponential (\texttt{"exp"}). Similarly, we used the von Mises (named \texttt{"vm"}) for the turning angle distribution, but one could use the wrapped Cauchy (\texttt{wrpcauchy}).
+
+Explore whether changing the distribution affects the fit of the model. Use AIC to compare the different models. Use the \texttt{plot} and \texttt{viterbi} functions to see whether it has a meaningful biological effect.
+
+For a description of the parameters needed for each of the distributions, please see \texttt{momentuHMM} vignette.
+
+<<distExp, echo=FALSE, results="hide", message=FALSE, cache=TRUE>>=
+
+###### Wrapped Cauchy for turning angle
+kappa0wp <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close 
+sealHMMwp <- fitHMM(sealPrep, nbState = 2, 
+                    dist=list(step="gamma", angle="wrpcauchy"), 
+                    Par0 = list(step=c(mu0,sigma0), angle=kappa0wp))
+
+AIC(sealHMM2s, sealHMMwp)# Wrapped Cauchy better
+
+###### Weibull for step length
+mu0 <- c(0.6, 1) # Shape 
+sigma0 <- c(1, 5) # Rate 
+kappa0 <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close 
+sealHMMwb <- fitHMM(sealPrep, nbState = 2, dist=list(step="weibull", angle="vm"), 
+       Par0 = list(step=c(mu0,sigma0), angle=kappa0))
+
+AIC(sealHMM2s,sealHMMwb) # Weibull is better
+#plot(sealHMMwb) # Doesn't have a big effect
+sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMwb)))/nrow(sealPrep) # Only 27 (2%) different states
+
+###### Exponential for step length
+mu0 <- c(2, 1) # Rate - has one less parameters
+kappa0 <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close 
+sealHMMexp <- fitHMM(sealPrep, nbState = 2, 
+                     dist=list(step="exp", angle="vm"), 
+                     Par0 = list(step=c(mu0), angle=kappa0))
+
+AIC(sealHMM2s, sealHMMwb,sealHMMexp) # Exponential is worst
+#plot(sealHMMexp) # It has a bit more of an effect
+sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMexp)))/nrow(sealPrep) # 128 different states (12%)
+@
+
+Many of the distributions, including the gamma distribution, are strictly positive. This means for example that you cannot have a step length of exactly 0 if you simply use the gamma distribution. You can however, use a zero-inflated distribution. Such a distribution assumes that there is a probability $z$ to observe a 0 and a probability $1-z$ to observe a positive value distributed according the the strictly positive distribution of your choice (e.g. the gamma). This can be achieved by adding a zero-mass starting value for each state in the step parameters (see the help page of \texttt{fitHMM} under the argument \texttt{Par0}). 
+
+
+\subsection{Effects of interpolation}
+
+The seal data we are using is not regular, by which I mean that the locations are not taken at regular time intervals. As a quick trick we regularised the data to 2 hours intervals using linear interpolation, but this is likely to affect the analysis. Here, explore the effects of using different time intervals. For example, look at the results when using 1, 4, 8 hours intervals. Look at both the fit of the model and the pseudo residuals.
+
+<<interpolation, echo=FALSE, results="hide", message=FALSE, cache=TRUE>>=
+
+# Let's try different time intervals
+# 1 hr
+ti1 <- seq(seal$date[1], seal$date[length(seal$date)], by=60*60)
+# 4 hr
+ti4 <- seq(seal$date[1], seal$date[length(seal$date)], by=4*60*60)
+ti8 <- seq(seal$date[1], seal$date[length(seal$date)], by=8*60*60)
+
+# Interpolate the location at the times from the sequence
+iLoc1 <- as.data.frame(cbind(lon=approx(seal$date, seal$lon,
+                                        xout = ti1)$y,
+                             lat=approx(seal$date, seal$lat, 
+                                        xout = ti1)$y))
+iLoc4 <- as.data.frame(cbind(lon=approx(seal$date, seal$lon,
+                                        xout = ti4)$y,
+                             lat=approx(seal$date, seal$lat, 
+                                        xout = ti4)$y))
+iLoc8 <- as.data.frame(cbind(lon=approx(seal$date, seal$lon,
+                                        xout = ti8)$y,
+                             lat=approx(seal$date, seal$lat, 
+                                        xout = ti8)$y))
+
+# Create a new object that has the regular time and interpolated locations
+sealreg1 <- cbind(date=ti1, iLoc1)
+sealreg4 <- cbind(date=ti4, iLoc4)
+sealreg8 <- cbind(date=ti8, iLoc8)
+
+# # Quickly plot the regularized locations 
+# plot(seal$lon, seal$lat,
+#      pch=19, cex=0.5, xlab="Lon", ylab="Lat", las=1)
+# points(sealreg1$lon, sealreg1$lat,  pch=19, cex=0.5, col=rgb(1,0,0,0.5))
+# points(sealreg$lon, sealreg$lat,  pch=19, cex=0.5, 
+#        col=rgb(0.8,0.8,0.8,0.5))
+# points(sealreg4$lon, sealreg4$lat, pch=19, cex=0.5, col=rgb(0,0,1,0.5))
+# points(sealreg8$lon, sealreg8$lat, pch=19, cex=0.5, col=rgb(0,1,1,0.5))
+
+# Create the prep data
+sealPrep1 <- prepData(sealreg1, type="LL", coordNames = c("lon", "lat"))
+sealPrep4 <- prepData(sealreg4, type="LL", coordNames = c("lon", "lat"))
+sealPrep8 <- prepData(sealreg8, type="LL", coordNames = c("lon", "lat"))
+
+# hist(sealPrep1$angle, breaks=20, 
+#      col=rgb(1,0,0,0.5), freq=FALSE,
+#      ylim=c(0,1), las=1)
+# hist(sealPrep$angle, breaks=20, add=TRUE,
+#      col=rgb(0.8,0.8,0.8,0.5), freq=FALSE)
+# hist(sealPrep4$angle, breaks=20, add=TRUE,
+#      col=rgb(0,0,1,0.5), freq=FALSE)
+# hist(sealPrep8$angle, breaks=20, add=TRUE,
+#      col=rgb(0,1,1,0.5), freq=FALSE)
+
+# None is exactly 0 == surprising... 
+sum(sealPrep1$angle == 0, na.rm = TRUE)
+sum(sealPrep$angle == 0, na.rm = TRUE)
+sum(sealPrep4$angle == 0, na.rm = TRUE)
+sum(sealPrep8$angle == 0, na.rm = TRUE)
+
+# Ok let's fit the 3 state HMM again
+# Fit a 3 state HMM
+sealHMM3s1 <- fitHMM(sealPrep1, 
+                    nbState = 3, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu03s, sigma03s), angle=kappa03s))
+sealHMM3s4 <- fitHMM(sealPrep4, 
+                    nbState = 3, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu03s, sigma03s), angle=kappa03s))
+sealHMM3s8 <- fitHMM(sealPrep8, 
+                    nbState = 3, 
+                    dist=list(step="gamma", angle="vm"), 
+                    Par0 = list(step=c(mu03s, sigma03s), angle=kappa03s))
+
+# plot(sealHMM3s1)
+# plot(sealHMM3s)
+# plot(sealHMM3s4)
+# plot(sealHMM3s8)
+# 
+# plotPR(sealHMM3s1)
+# plotPR(sealHMM3s)
+# plotPR(sealHMM3s4)
+# plotPR(sealHMM3s8)
+@
+
+
+\section{Thanks}
+
+Thanks to Th\'eo Michelot for input and help!
+
+\end{document}

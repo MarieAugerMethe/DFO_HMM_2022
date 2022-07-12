@@ -7,7 +7,7 @@ output:
     number_sections: true
 ---
 
-# Hidden Markov Models: Missing data and multiple data streams
+# Tutorial goals and set up
 
 ## objectives
 
@@ -26,7 +26,14 @@ library(momentuHMM)
 ```
 
 ```{r message=FALSE}
-read.csv()
+track_sum <- read.csv("data/track_summary.csv")
+dive_sum <- read.csv("data/dive_summary.csv")
+172064
+172063
+172066
+
+tracks <- read.csv("data/tracks.csv")
+dives <- read.csv("data/dives.csv")
 ```
 
 # visualise data
