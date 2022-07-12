@@ -10,7 +10,6 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
 # Tutorial goals and set up
 
 The goal of this tutorial is to explore how to fit hidden Markov models
