@@ -127,10 +127,14 @@ two steps). The package `momentuHMM` has a function that does that:
 WGS84. You can use `prepData` on latitude and longitude data 1 or on
 projected data (e.g., UTM). `prepData` can do much more, and we will see
 some other features later, but for now the arguments that we need to
-think about are: - type: whether it's easting/northing coordinate system
-(`type="UTM"`) or whether it's longitude/latitude (`type = "LL"`). We
-are using `"LL"`. - `"coordNames"`: the names of the columns with the
-coordinates. So in our case `lon` and `lat`.
+think about are:
+
+-   type: whether it's easting/northing coordinate system (`type="UTM"`)
+    or whether it's longitude/latitude (`type = "LL"`). We are using
+    `"LL"`.
+
+-   `"coordNames"`: the names of the columns with the coordinates. So in
+    our case `lon` and `lat`.
 
 ```{r}
 # Preparing the data: here mainly calculating step
@@ -175,7 +179,7 @@ movement (e.g., foraging). This mean that the argument `nbState` will be
 set to 2. Second, we need to decide whether we make the transition
 probabilities between the behavioural states dependent on covariates.
 Here again, we will start simple and we will not use covariates. That
-means that our formula argument will be `∼1`. Third, we need to select
+means that our formula argument will be `~1`. Third, we need to select
 the distribution we will use to model the step lengths and the one we
 will use to model the turning angles. For now, we will use the gamma
 distribution for the step length and the von Mises for the turning
@@ -228,11 +232,12 @@ abline(h = 7, col = rgb(1, 0, 0, 0.5))
 
 So let's choose 3 and 7 for the means step lengths and use the same
 values for the standard deviations. The turning angles are either very
-close to 0 or pretty spread from −π to π. High concentration parameter
-values (κ, said kappa) mean that the animal has a tendency to move in
-the same direction. Values close to 0 mean that the turning angle
-distribution is almost uniform (the animal turns in all directions).
-Note that κ cannot be exactly 0, so let's choose 0.1 and 1.
+close to 0 or pretty spread from $-\pi$ to $\pi$. High concentration
+parameter values ($\kappa$, said kappa) mean that the animal has a
+tendency to move in the same direction. Values close to 0 mean that the
+turning angle distribution is almost uniform (the animal turns in all
+directions). Note that $\kappa$ cannot be exactly 0, so let's choose 0.1
+and 1.
 
 ```{r}
 # Setting up the starting values
@@ -508,7 +513,7 @@ the behavioural states. Note that we could just plot directly the
 simulated data, rather than estimating the fitting the model and
 predicting the states. This might require a bit of fiddling (A good
 thing to know is that the colour paletter used by the packages is:
-`c("\#E69F00", "\#56B4E9", "\#009E73", "\#F0E442", "\#0072B2", "\#D55E00", "\#CC79A7")`).
+`c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")`).
 One way fitting the model to the simulated data may be useful is in
 identifying whether you have enough data to estimate your parameters
 accurately.
@@ -627,8 +632,8 @@ starting values based on our simpler 3-state HMMs. This might be a bit
 of an overkill for this model, as `getPar0` will set the starting values
 for the covariate effects on the transition probabilities to 0. But it
 can make a small difference to use good starting values for the other
-parameters (might be worth looking if it makes indeed a difference). Note
-that to be able to use `getPar0` in this case, we have to refit the
+parameters (might be worth looking if it makes indeed a difference).
+Note that to be able to use `getPar0` in this case, we have to refit the
 simpler model with the new data that has the bathymetry data.
 
 ```{r message=FALSE}
@@ -659,23 +664,23 @@ sealHMMb <- fitHMM(sealPrep, nbState = 3,
 ```
 
 ```{r}
-
 sealHMMb
 ```
 
 The first thing to note is that the model now has a new row of
-parameters in the section `Regression coeffs for the transition
-probabilities`. This row represents the effects of bathymetry on the
-transition probabilities. A positive value means that increasing values
-of the covariate increase the switching probability, while a negative
-value means the reverse relationship. So for example, as bathymetry
-increases, the probability of switching from state 1 to state 2 only
-slightly increases, but the probability of switching from state 3 to
-state 1 increases much more. Note that the relationship between these
-coefficients and the final transition probabilities are dependent on
-each other and on the intercept, see math section for details. Keep in
-mind here that bathymetry is represented in negative values, so as
-bathymetry value increases the seal is in shallower water.
+parameters in the section
+`Regression coeffs for the transition probabilities`. This row
+represents the effects of bathymetry on the transition probabilities. A
+positive value means that increasing values of the covariate increase
+the switching probability, while a negative value means the reverse
+relationship. So for example, as bathymetry increases, the probability
+of switching from state 1 to state 2 only slightly increases, but the
+probability of switching from state 3 to state 1 increases much more.
+Note that the relationship between these coefficients and the final
+transition probabilities are dependent on each other and on the
+intercept, see math section for details. Keep in mind here that
+bathymetry is represented in negative values, so as bathymetry value
+increases the seal is in shallower water.
 
 The row with the intercept represents the base probabilities before we
 incorporate the bathymetry effects. In model without covariates, you
@@ -683,14 +688,15 @@ would only get the intercept values and would use them alone to
 calculate the transition probabilities, see the math section below for
 more details.
 
-Let's look at it visually. First by using the generic `plot`
-function and, then, by using the function `plotStationary`, which plots
-the stationary state probabilities.
+Let's look at it visually. First by using the generic `plot` function
+and, then, by using the function `plotStationary`, which plots the
+stationary state probabilities.
 
 ```{r}
 plot(sealHMMb)
-plotStationary(sealHMMb)
 ```
+
+<!-- # plotStationary(sealHMMb) -->
 
 We can see that the bathymetry mainly affects the transition probability
 in high bathymetry values (so, close/on land). One of the most obvious
@@ -753,7 +759,7 @@ sealPrep$hour <- as.integer(strftime(sealPrep$date, format = "%H", tz="Etc/GMT+4
 Here again we can make the covariate affect the transition
 probabilities. The difference, is that we have to use a more complex
 function that represents the cyclical nature of time of day. This is the
-`cosinor` function. For more information on the `cosinor`} function, see
+`cosinor` function. For more information on the `cosinor` function, see
 mathy section below.
 
 ```{r message = FALSE}
@@ -788,7 +794,7 @@ it appears to be affecting state 1, which is likely resting. According
 to AIC it's less good than the bathymetry model.
 
 To help understand the relationship further we can also use the function
-`plotStationary`}, which display the relationship between the covariate
+`plotStationary`, which display the relationship between the covariate
 and the stationary probability of being in each state rather than the
 relationship between the covariates and the switching probability.
 
@@ -800,17 +806,17 @@ So it looks like there is a higher probability of being in state 2 (the
 foraging type of behaviour) at night and a peak in each of the other
 behaviours during different period of the day.
 
-\% Ask kim if the data is in UTC?
+<!-- Ask kim if the data is in UTC? -->
 
 Covariates can affect the state-dependent movement, by which I mean the
 characteristics of the movement in a given state. So for example, the
 animal might make all the behaviours at night and during the day, but at
 night it might do them with smaller steps. Here, we are going to look at
 whether the seal is more or less directed at night. To do this, we are
-going to change the argument `DM`}. For this kind of model, it's
-particular useful to use `getPar0`}, because it helps set starting
-values for the parameters associated with the effects of covariates on
-the movement parameters.
+going to change the argument `DM`. For this kind of model, it's
+particular useful to use `getPar0`, because it helps set starting values
+for the parameters associated with the effects of covariates on the
+movement parameters.
 
 ```{r}
 # Use the formula to describe the changes in the design matrix
@@ -820,21 +826,24 @@ diurnDM <- list(angle = list(concentration = ~ cosinor(hour, period = 24)))
 par0diurnDM <- getPar0(model=sealHMM3s, DM=diurnDM)
 # Look at starting values
 par0diurnDM
+```
 
+```{r message=FALSE}
 # Now we fit the new diurnal model with the starting values returned by getPar0
 sealHMMdiurnDM <- fitHMM(sealPrep, nbState = 3,
                         dist=list(step="gamma", angle="vm"),
                         Par0 = par0diurnDM$Par, beta0=par0diurnDM$beta,
                         DM=diurnDM)
+```
 
-
+```{r}
 # Let's look at the results
 sealHMMdiurnDM
 plot(sealHMMdiurnDM, plotCI=TRUE)
 AIC(sealHMMb, sealHMMdiurn, sealHMMdiurnDM)
 ```
 
-\% could add plitCI above too, and discuss it.
+<!-- could add plitCI above too, and discuss it. -->
 
 So here it looks like the seal makes more directed movement in state 1
 at night, makes more directed movement in state 2 early in the morning,
@@ -843,7 +852,7 @@ and makes more directed movement in state 3 early in the morning.
 Note that we can combine various covariates. For example, here we are
 going to combine bathymetry and time of day.
 
-```{r}
+```{r message=FALSE}
 # Get parameter starting values
 par0bd <- getPar0(model=sealHMM3s, formula=bathyForm, DM=diurnDM)
 
@@ -853,8 +862,9 @@ sealHMMbd <- fitHMM(sealPrep, nbState = 3,
                         Par0 = par0bd$Par, beta0=par0bd$beta,
                         formula=bathyForm,
                         DM=diurnDM)
+```
 
-
+```{r}
 # Let's look at the results
 sealHMMbd
 plot(sealHMMbd)
@@ -924,24 +934,16 @@ To incorporate the covariates we are saying that the transition
 probabilities are changing through time as a function of the covariate
 values at that time step. Specifically,
 
-```{=tex}
-\begin{equation}
-\label{linkFx}
-\gamma^{(t)}_{ij} = \frac{\exp(\eta_{ijt})}{\sum^N_{k=1}\exp(\eta_{ikt})},
-\end{equation}
-```
+$$
+\begin{equation}\label{linkFx}\gamma^{(t)}_{ij} = \frac{\exp(\eta_{ijt})}{\sum^N_{k=1}\exp(\eta_{ikt})},\end{equation}
+$$
+
 where
 
-```{=tex}
-\begin{equation}
-\label{covRel}
-\eta_{ijt} =
-\begin{cases}
-\beta_{0ij} + \sum^p_{l=1} \beta_{lij} w_{lt} & \text{if} \ i \neq j,\\
-0, & \text{otherwise},
-\end{cases}
-\end{equation}
-```
+$$
+\begin{equation}\label{covRel}\eta_{ijt} =\begin{cases}\beta_{0ij} + \sum^p_{l=1} \beta_{lij} w_{lt} & \text{if} \ i \neq j,\\0, & \text{otherwise},\end{cases}\end{equation}
+$$
+
 where $w_{lt}$ is the $l$-th covariate at time $t$ and $p$ is the number
 of covariates considered. The equation \ref{linkFx} is only a link
 function to insure that the transitions probabilities are between 0 and
@@ -999,10 +1001,13 @@ plot(cos(2*pi*(1:24)/24), pch=19, ylab="cosinorCos", xlab="Time of day")
 plot(sin(2*pi*(1:24)/24), pch=19, ylab="cosinorSin", xlab="Time of day")
 ```
 
-\% WOULD NOT PUT THAT MUCH FAITH IN INITIAL DIST ESTIMATE (ASSUME BY
-DEFAULT THAT NON-STATIONARY) % % TO DO: standardize? % % TO DO: model
-selection, AIC, think Ben Bolker, model complexity. % % TO DO: use known
-states %
+<!-- WOULD NOT PUT THAT MUCH FAITH IN INITIAL DIST ESTIMATE (ASSUME BY -->
+
+<!-- DEFAULT THAT NON-STATIONARY) % % TO DO: standardize? % % TO DO: model -->
+
+<!-- selection, AIC, think Ben Bolker, model complexity. % % TO DO: use known -->
+
+<!-- states -->
 
 ## Activities
 
@@ -1023,7 +1028,7 @@ position observed. We are also limiting the simulation to a time series
 of 200 steps. We are also setting the seed, because the animal will
 often wonder off map by chance.
 
-```{r}
+```{r message=FALSE}
 set.seed(1)
 sealSimB <- simData(model=sealHMMb, nbAnimals =1, spatialCovs = list(bathy=bathy),
                     initialPosition = as.matrix(sealreg[1,c("lon","lat")]),
@@ -1033,7 +1038,9 @@ sealSimFitB <- fitHMM(sealSimB,
                    dist=list(step="gamma", angle="vm"),
                    Par0 = par0b$Par, beta0=par0b$beta,
                    formula=bathyForm)
+```
 
+```{r}
 # Plot simulation
 plot(water, col=bluePal(50))
 points(sealSimB[,c("x","y")],
@@ -1065,14 +1072,16 @@ functions to see whether it has a meaningful biological effect.
 For a description of the parameters needed for each of the
 distributions, please see `momentuHMM` vignette.
 
-```{r}
+```{r message=FALSE}
 
 ###### Wrapped Cauchy for turning angle
 kappa0wp <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close
 sealHMMwp <- fitHMM(sealPrep, nbState = 2,
                     dist=list(step="gamma", angle="wrpcauchy"),
                     Par0 = list(step=c(mu0,sigma0), angle=kappa0wp))
+```
 
+```{r}
 AIC(sealHMM2s, sealHMMwp)# Wrapped Cauchy better
 
 ###### Weibull for step length
@@ -1089,10 +1098,15 @@ sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMwb)))/nrow(sealPrep) # Only 27 (2%) 
 ###### Exponential for step length
 mu0 <- c(2, 1) # Rate - has one less parameters
 kappa0 <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close
+```
+
+```{r message=FALSE}
 sealHMMexp <- fitHMM(sealPrep, nbState = 2,
                      dist=list(step="exp", angle="vm"),
                      Par0 = list(step=c(mu0), angle=kappa0))
+```
 
+```{r}
 AIC(sealHMM2s, sealHMMwb,sealHMMexp) # Exponential is worst
 #plot(sealHMMexp) # It has a bit more of an effect
 sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMexp)))/nrow(sealPrep) # 128 different states (12%)
