@@ -1,18 +1,17 @@
 ---
-title: "Tutorial - Hidden Markov Models"
+title: "Hidden Markov Models: Basics for animal movement data"
 output:
-  html_document: default
-  pdf_document: default
-editor_options: 
-  markdown: 
-    wrap: 72
+  html_document:
+    number_sections: true
+  pdf_document: 
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Hidden Markov Models: tutorial goals and set up
+# Hidden Markov Models: Basics for animal movement data
 
 The goal of this tutorial is to explore how to fit hidden Markov models
 (HMMs) to movement data. To do so, we will investigate a new R package,
@@ -26,7 +25,7 @@ inclusion of covariates as raster layers, and much more, see associated
 paper:
 <https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.12995>.
 
-### Setup and data preparation
+## Setup and data preparation
 
 First, let's load the packages that we will need to complete the
 analyses. Off course you need to have them installed first.
@@ -92,7 +91,7 @@ tz = "GMT")
 tint <- as.numeric(diff(seal$date), units = "hours")
 # Let's look at the time intervals
 summary(tint)
-## Min. 1st Qu. Median Mean 3rd Qu. Max.
+# Min. 1st Qu. Median Mean 3rd Qu. Max.
 plot(tint, ylab = "Time interval (hr)", pch = 19, cex = 0.5,
 las = 1)
 # Let's go for 2 hrs, look at the activities to see
@@ -163,9 +162,8 @@ plot(sealPrep)
 
 We can see the track of the animal and the times series of the step
 lengths and turning angles, as well as the histograms of the step
-lengths and turning angles. Can you already identify patterns?
-
-## Fitting the HMM
+lengths and turning angles. Can you already identify patterns? \#\#
+Fitting the HMM
 
 Now that our data is ready to use, we can fit the HMM. For this we use
 the function `fitHMM`. This is where we need to make many of our
@@ -196,30 +194,31 @@ check
 sum(sealPrep$step == 0, na.rm = TRUE)
 ```
 
-We are ok. We can ignore the zero-inflation. By default, `fitHMM` will
-set the argument `estAngleMean` to `NULL`, which means that we assume
-that the mean angle is 0 for both behaviours (i.e., the animal has a
-tendency to continue in the same direction) and that only the angle
-concentration parameters differ. The concentration parameters control
-the extent to which the animal continues forward versus turn. Doing so
-reduces the number of parameters to estimate. These are all very
-important decisions that you must make when you construct your model. In
-addition, we need to specify initial values for the parameters to
-estimate. The HMMs are fitted using maximum likelihood estimate (MLE)
-with a numerical optimizer. An unfortunate aspect of fitting models
-using numerical optimizers, is that, to be able to explore the parameter
-space and find the best parameter values for the model, the optimizer
-needs to start somewhere. You need to decide where it starts.
-Unfortunately, choosing bad starting values can result in parameter
-estimates that are not the MLE, but just a local maximum. To choose your
-initial parameter you can take a quick peak at the data (e.g., using the
-plots above) and use some general biological information. For example,
-it's common for animals to have one behaviour with long step lengths and
-small turning angles and one behaviour with short step lengths and
-larger turning angles. From the plots above, it looks like the animal
-has step lengths that are close to 0, 3, 7. As I see it, there are
-probably three behaviours with different mean step lengths around these
-values.
+We are ok. We can ignore the zero-inflation.
+
+By default, `fitHMM` will set the argument `estAngleMean` to `NULL`,
+which means that we assume that the mean angle is 0 for both behaviours
+(i.e., the animal has a tendency to continue in the same direction) and
+that only the angle concentration parameters differ. The concentration
+parameters control the extent to which the animal continues forward
+versus turn. Doing so reduces the number of parameters to estimate.
+These are all very important decisions that you must make when you
+construct your model. In addition, we need to specify initial values for
+the parameters to estimate. The HMMs are fitted using maximum likelihood
+estimate (MLE) with a numerical optimizer. An unfortunate aspect of
+fitting models using numerical optimizers, is that, to be able to
+explore the parameter space and find the best parameter values for the
+model, the optimizer needs to start somewhere. You need to decide where
+it starts. Unfortunately, choosing bad starting values can result in
+parameter estimates that are not the MLE, but just a local maximum. To
+choose your initial parameter you can take a quick peak at the data
+(e.g., using the plots above) and use some general biological
+information. For example, it's common for animals to have one behaviour
+with long step lengths and small turning angles and one behaviour with
+short step lengths and larger turning angles. From the plots above, it
+looks like the animal has step lengths that are close to 0, 3, 7. As I
+see it, there are probably three behaviours with different mean step
+lengths around these values.
 
 ```{r}
 plot(sealPrep$step ~
@@ -246,7 +245,7 @@ sigma0 <- c(3, 7) # Sd of the step length
 kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
 ```
 
-Ok, were are ready. Let's fit the HMM2
+Ok, were are ready. Let's fit the HMM
 
 ```{r message=FALSE}
 # Fit a 2 state HMM
@@ -275,7 +274,7 @@ the transition probabilities estimated indicate that the animal remain
 in each behaviour for multiple steps (diagonal values of the transition
 probability matrix are \> 0.5). What's happening?
 
-## Identifying behavioural states
+# Identifying behavioural states
 
 Maybe looking at the state sequence in more detail will help us
 understand. Actually, we are interested in identifying when an animal is
@@ -293,11 +292,12 @@ head(sealStates, 20)
 table(sealStates)
 ```
 
-So they are some state 1, we are just not seeing them! In many cases, it
-is more interesting to get the probability of being in each state rather
-than the most likely state. To do so, you can use the function
-`stateProbs`, which returns a matrix of the probability of being in each
-state for each time step.
+So they are some state 1, we are just not seeing them!
+
+In many cases, it is more interesting to get the probability of being in
+each state rather than the most likely state. To do so, you can use the
+function `stateProbs`, which returns a matrix of the probability of
+being in each state for each time step.
 
 ```{r}
 # Calculate the probability of being in each state
@@ -311,8 +311,10 @@ time steps. Here, the probability of being in state 1 is really high for
 these steps, but that may not always be the case. Sometimes you might
 have values closer to 0.5, which would indicate that for that time step,
 it's hard to identify which state you are in (i.e., which step length
-and turning angle distributions fit best). You can plot the results from
-both of these functions using the function `plotState`
+and turning angle distributions fit best).
+
+You can plot the results from both of these functions using the function
+`plotState`
 
 ```{r}
 plotStates(sealHMM2s)
@@ -321,11 +323,11 @@ plotStates(sealHMM2s)
 We clearly have two behavioural states. The steps from `state` 1 are
 just too small for us to see them in the track.
 
-## But do we have a good model?
+# But do we have a good model?
 
 This is all great, but is this a good model for our data?
 
-### Starting values: should we care?
+## Starting values: should we care?
 
 The first thing we need to look into is whether the parameter estimates
 are reliable. As I mentioned above, the initial parameter values can
@@ -443,7 +445,7 @@ selecting initial parameters for complex models. However, these
 functions rely on the user choosing initial parameter values for a
 simple model like the one we just explored.
 
-### Pseudo-residuals
+## Pseudo-residuals
 
 Ok, we fitted a model to data, looks like the parameter estimates are
 reliable, and we can get state probabilities, but is this a good model
@@ -503,16 +505,15 @@ does look like the movement in state 2 is more tortuous and in focal
 areas, while the movement in state 3 is very directed and span larger
 areas.
 
-### Simulating data
+## Simulating data
 
 We can also use the function `simData` to look at whether the movement
-produce by the models is similar to the observed movement.
-
-Let's simulate the 3-state HMMs, and then fit it to be able to identify
-the behavioural states. Note that we could just plot directly the
-simulated data, rather than estimating the fitting the model and
-predicting the states. This might require a bit of fiddling (A good
-thing to know is that the colour paletter used by the packages is:
+produce by the models is similar to the observed movement. Let's
+simulate the 3-state HMMs, and then fit it to be able to identify the
+behavioural states. Note that we could just plot directly the simulated
+data, rather than estimating the fitting the model and predicting the
+states. This might require a bit of fiddling (A good thing to know is
+that the colour paletter used by the packages is:
 `c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")`).
 One way fitting the model to the simulated data may be useful is in
 identifying whether you have enough data to estimate your parameters
@@ -542,7 +543,7 @@ some of the same locations, something not captured in the simulation.
 The parameter estimates are closed to those used to simulate the data,
 which is good.
 
-### Confidence intervals
+## Confidence intervals
 
 We can look at the confidence intervals for the parameter estimates.
 This does not necessarily give us an idea of whether the model is good
@@ -564,7 +565,7 @@ We can see that the 95% confidence intervals of mean step length does
 not overlap for the three states, indicating that, in term of step
 lengths, they vary quite a bit.
 
-## Understanding the factors that affect movement: including covariates
+# Understanding the factors that affect movement: including covariates
 
 `momentuHMM` allows you to incorporate various covariates in the model
 in many different ways, which allows you to understand how covariates
@@ -572,7 +573,7 @@ affect the behaviour and movement of the animal. There are so many
 different options (including activity centers, spatial covariates, etc),
 that it's impossible to look at them all here. Here are a few examples.
 
-### Spatial covariates
+## Spatial covariates
 
 One of the most exciting aspect of `momentuHMM` is that you can
 incorporate spatial covariates that are kept in a raster file. Here we
@@ -740,7 +741,7 @@ plotPR(sealHMM3s)
 
 Still some issues, but not too too bad.
 
-### Non spatial covariates
+## Non spatial covariates
 
 Could there be diurnal patterns explaining the autocorrelation in
 turning angles? We are not limited to incorporate spatial covariates. We
@@ -881,7 +882,7 @@ This is where we stop the main tutorial. There are two other sections
 below. One that describes some of the mathematical details and one with
 activities that you can do on your own to further explore HMMs.
 
-## For the statistically/mathematically inclined
+# For the statistically/mathematically inclined
 
 One of the most exciting aspect of the `momentuHMM` package is that you
 can incorporate the potential effects of environmental covariates on the
@@ -894,6 +895,7 @@ covariate relationships mean.
 If you have a model that has two behavioural states (state 1 and 2) and
 no covariates, you would have a transition probability matrix like this:
 
+
 \begin{equation}
 \mathbf{\Gamma} =
 \begin{pmatrix}
@@ -901,6 +903,7 @@ no covariates, you would have a transition probability matrix like this:
 \gamma_{21} & \gamma_{22}
 \end{pmatrix}
 \end{equation},
+
 
 where $\gamma_{ij}$ represent the probability of switching from i to j.
 For example, $\gamma_{11}$ represents the probability of staying in
@@ -918,34 +921,33 @@ sealHMM2s
 ```
 
 We can see that the probability of switching in state 2 if you are in
-state 1 is \Sexpr{round(sealHMM2s$mle$gamma[1,2],2)} and so the
-probability of staying in state 1 is
-\Sexpr{1-round(sealHMM2s$mle$gamma[1,2],2)} $=$
-\Sexpr{round(sealHMM2s$mle$gamma[1,1],2)}. The same logic applies to the
-probability of staying or switching from state 2. This means that for a
-model with $N$ behavioural states, we only need to estimate $N (N-1)$
-transition probabilities (so 2 for the example here), because for each
-state at time $t-1$ we will be able to calculate one of the transition
-probabilities based on the difference with the sum of the transition
-probabilities estimated (so here we can deduce $\gamma_{11}$ based on
-$\gamma_{12}$).
+state 1 is `r round(sealHMM2s$mle$gamma[1,2],2)` and so the probability
+of staying in state 1 is
+`r 1-round(sealHMM2s$mle$gamma[1,2],2)`=`r round(sealHMM2s$mle$gamma[1,1],2)`.
+The same logic applies to the probability of staying or switching from
+state 2. This means that for a model with $N$ behavioural states, we
+only need to estimate $N (N-1)$ transition probabilities (so 2 for the
+example here), because for each state at time $t-1$ we will be able to
+calculate one of the transition probabilities based on the difference
+with the sum of the transition probabilities estimated (so here we can
+deduce $\gamma_{11}$ based on $\gamma_{12}$).
 
 To incorporate the covariates we are saying that the transition
 probabilities are changing through time as a function of the covariate
 values at that time step. Specifically,
 
-$$
+
 \begin{equation}\label{linkFx}\gamma^{(t)}_{ij} = \frac{\exp(\eta_{ijt})}{\sum^N_{k=1}\exp(\eta_{ikt})},\end{equation}
-$$
+
 
 where
 
-$$
+
 \begin{equation}\label{covRel}\eta_{ijt} =\begin{cases}\beta_{0ij} + \sum^p_{l=1} \beta_{lij} w_{lt} & \text{if} \ i \neq j,\\0, & \text{otherwise},\end{cases}\end{equation}
-$$
+
 
 where $w_{lt}$ is the $l$-th covariate at time $t$ and $p$ is the number
-of covariates considered. The equation \ref{linkFx} is only a link
+of covariates considered. Equation \ref{linkFx} is only a link
 function to insure that the transitions probabilities are between 0 and
 1 and that the row sum to 1. The important relationship between the
 covariates and the transition probabilities are in equation
@@ -986,7 +988,7 @@ $N(N-1)$ parameters to your model, where $N$ is the number of states. So
 if you have many behavioural states, it will results in a very complex
 model.
 
-### cosinor
+## cosinor
 
 The function `cosinor` internally creates the covariates
 cos$(2 \pi \; \text{value}/\text{period})$ and
@@ -1009,14 +1011,14 @@ plot(sin(2*pi*(1:24)/24), pch=19, ylab="cosinorSin", xlab="Time of day")
 
 <!-- states -->
 
-## Activities
+# Activities
 
-### Try it on your own data
+## Try it on your own data
 
 Give it a try on your own data! If you don't have data try the other
 activities.
 
-### Activity centers
+## Activity centers
 
 This is fun but could be hard. Skip to the next activity if you find the
 material challenging.
@@ -1054,16 +1056,16 @@ expect it to go. But the state 1 is only in shallow waters.
 Look at the `momentuHMM` vignette and see whether you can include
 activity centers.
 
-### Modelling step length and turning angles
+## Modelling step length and turning angles
 
 You can model the observations with a set of different distributions. To
 change the distribution simply requires changing the argument `dist` in
-the function `fitHMM`}. In the example above, we used the gamma
-distribution (using the name`"`gamma"}) for the step length. However,
+the function `fitHMM`. In the example above, we used the gamma
+distribution (using the name`"`gamma`") for the step length. However,
 you can use a variety of alternative distribution, including: Weibull
-`("`weibull"}) and exponential `("`exp"}). Similarly, we used the von
-Mises (named`"`vm"}) for the turning angle distribution, but one could
-use the wrapped Cauchy (`wrpcauchy`}).
+("`weibull`") and exponential ("`exp`"). Similarly, we used the von
+Mises (named"`vm`") for the turning angle distribution, but one could
+use the wrapped Cauchy (`wrpcauchy`).
 
 Explore whether changing the distribution affects the fit of the model.
 Use AIC to compare the different models. Use the `plot` and `viterbi`
@@ -1074,7 +1076,7 @@ distributions, please see `momentuHMM` vignette.
 
 ```{r message=FALSE}
 
-###### Wrapped Cauchy for turning angle
+#### Wrapped Cauchy for turning angle
 kappa0wp <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close
 sealHMMwp <- fitHMM(sealPrep, nbState = 2,
                     dist=list(step="gamma", angle="wrpcauchy"),
@@ -1084,7 +1086,7 @@ sealHMMwp <- fitHMM(sealPrep, nbState = 2,
 ```{r}
 AIC(sealHMM2s, sealHMMwp)# Wrapped Cauchy better
 
-###### Weibull for step length
+#### Weibull for step length
 mu0 <- c(0.6, 1) # Shape
 sigma0 <- c(1, 5) # Rate
 kappa0 <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close
@@ -1095,7 +1097,7 @@ AIC(sealHMM2s,sealHMMwb) # Weibull is better
 #plot(sealHMMwb) # Doesn't have a big effect
 sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMwb)))/nrow(sealPrep) # Only 27 (2%) different states
 
-###### Exponential for step length
+#### Exponential for step length
 mu0 <- c(2, 1) # Rate - has one less parameters
 kappa0 <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close
 ```
@@ -1120,9 +1122,9 @@ that there is a probability $z$ to observe a 0 and a probability $1-z$
 to observe a positive value distributed according the the strictly
 positive distribution of your choice (e.g., the gamma). This can be
 achieved by adding a zero-mass starting value for each state in the step
-parameters (see the help page of `fitHMM` under the argument `Par0`}).
+parameters (see the help page of `fitHMM` under the argument `Par0`).
 
-### Effects of interpolation}
+## Effects of interpolation
 
 The seal data we are using is not regular, by which I mean that the
 locations are not taken at regular time intervals. As a quick trick we
@@ -1216,6 +1218,6 @@ sealHMM3s8 <- fitHMM(sealPrep8,
 # plotPR(sealHMM3s8)
 ```
 
-## Thanks
+# Thanks
 
-Thanks to Th'eo Michelot for input and help!
+Thanks to Théo Michelot for input and help!
