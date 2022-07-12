@@ -1,9 +1,9 @@
 ---
 title: "Hidden Markov Models: Basics for animal movement data"
 output:
-  html_document:
-    number_sections: true
   pdf_document: 
+    number_sections: true
+  html_document:
     number_sections: true
 ---
 
@@ -11,7 +11,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Hidden Markov Models: Basics for animal movement data
+# Tutorial goals and set up
 
 The goal of this tutorial is to explore how to fit hidden Markov models
 (HMMs) to movement data. To do so, we will investigate a new R package,
