@@ -7,22 +7,40 @@ output:
     number_sections: true
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
 # Hidden Markov Models: Missing data and multiple data streams
-## objectives 
-Dealing irregular locations, time gaps, including diving covariates - narwhal data 
 
+## objectives
+
+-   Dealing irregular locations,
+
+-   time gaps,
+
+-   including diving covariates
+
+-   narwhal data
 
 # import data
+First, we'll setup the workspace with required packages
+```{r message=FALSE}
+library(momentuHMM)
+```
+
+```{r message=FALSE}
+read.csv()
+```
 
 # visualise data
+
 # assess data structure (resolution/gaps)
+
 # brainstorm methods to merge data streams (same resolution, hierarchical)
+
 # brainstorm methods to select resolution
+
 # brainstorm methods to fill missing data (NA, linear interpolation, imputation, multiple imputation, track segmentation)
+
 # basic HMM (only locs)
+
 # brainstorm HMM development (dive-only HMM, or add dives to locs, covariates to add; covs to TPM & DS (eg angle bias))
+
 # setup tutorial development issue thread
