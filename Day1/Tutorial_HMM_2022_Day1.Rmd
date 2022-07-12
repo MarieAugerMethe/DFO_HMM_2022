@@ -1,28 +1,17 @@
 ---
 title: "Hidden Markov Models: Basics for animal movement data"
 output:
-<<<<<<< HEAD:Day 1/Tutorial_HMM_2022_Day1.Rmd
   html_document:
     number_sections: true
   pdf_document: 
     number_sections: true
-=======
-  pdf_document: 
-    number_sections: true
-  html_document:
-    number_sections: true
->>>>>>> 618f0d9a37ef0169670e8c0b6f070d6ca577334e:Day1/Tutorial_HMM_2022.Rmd
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-<<<<<<< HEAD:Day 1/Tutorial_HMM_2022_Day1.Rmd
 # Hidden Markov Models: Basics for animal movement data
-=======
-# Hidden Markov Models: tutorial goals and set up
->>>>>>> 618f0d9a37ef0169670e8c0b6f070d6ca577334e:Day1/Tutorial_HMM_2022.Rmd
 
 The goal of this tutorial is to explore how to fit hidden Markov models
 (HMMs) to movement data. To do so, we will investigate a new R package,
