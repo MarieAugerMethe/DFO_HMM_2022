@@ -1,10 +1,13 @@
 ---
 title: "Hidden Markov Models: Basics for animal movement data"
+author: "Marie Auger-Méthé"
 output:
   pdf_document: 
     number_sections: true
   html_document:
     number_sections: true
+editor_options:
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
