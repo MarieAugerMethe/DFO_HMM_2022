@@ -28,7 +28,7 @@ First, we'll setup the workspace with required packages
 ```{r message=FALSE}
 library(momentuHMM)
 library(dplyr)
-library(ggplot2)
+library(tidyr)
 library(lubridate)
 library(adehabitatLT)
 library(sf)
@@ -57,8 +57,6 @@ tracks <- tracks %>%
   )) # calculate time difference
 
 hist(tracks$dt, 1000, main = NA, xlab = "Time difference (min)")
-
-hist(subset(tracks, dt < 60 & dt > 0)$dt, 60, main = NA, xlab = "Time difference (min)")
 ```
 
 Next, we'll convert the data to a spatial dataset using the `sf` package and plot the data.
@@ -146,13 +144,64 @@ tracks_gps %>%
 ```
 We lose some data, particularly near the end of the tracks, but we will integrate ARGOS locations later in this tutorial.
 
+## selecting a time interval for the HMH
+there are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g. seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min. 
+
+Let's see what resolutions may be possible in the data by looking at the most frequent time gaps.
+```{r}
+# identify the most frequent dt
+tracks_gps %>% 
+  {table(.$dt)} %>% 
+  sort(decreasing = T) %>% 
+  head()
+# visualise time differences
+hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)")
+hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)", xlim = c(0,100))
+```
+We see that that the most frequent time gap is 10 min, followed by 1, 11, and 12 min. We also see the majority of the gaps are < 60 min, however some are in excess of 600 min. Although it may be possible to use 1 or 2 min resolution data, we will have to address the data gaps. Frequent and large data gaps can be difficult to handle, especially as the number of missing data points approaches or exceeds the existing data; we really want to avoid this. Let's examine the potential data structure at different resolutions for the different animals.
+```{r}
+# make function to estimate proportion of missing location 
+p_na <- function(t_0, t_max, n_loc, resolution) {
+  max_n_loc <- length(seq(t_0, t_max, by = as.difftime(resolution, units = "mins")))
+  n_NA <- max_n_loc - n_loc
+  n_NA / max_n_loc
+}
+
+# summarise tracks
+ track_summary <-
+    tracks_gps %>% st_drop_geometry() %>% 
+  # limit to core period with data
+  filter(time >= ymd("2017-8-1") & time <= ymd("2017-8-31")) %>% 
+  group_by(ID) %>% 
+    filter(dt >= 1) %>% # remove duplicate time (just for this stage)
+    summarise(n_loc = n(), # number of locations
+              p_NA_1m = p_na(first(time), last(time), n_loc, 1),  # 1 min 
+              p_NA_2m = p_na(first(time), last(time), n_loc, 2),  # 2 min 
+              p_NA_5m = p_na(first(time), last(time), n_loc, 5),  # 5 min 
+              p_NA_10m =p_na(first(time), last(time), n_loc, 10),  # 10 min 
+              p_NA_20m =p_na(first(time), last(time), n_loc, 20))  # 20 min 
+track_summary
+```
+Here we see that despite the large number of 1 min time steps, at that resolution, >95 /% of the potential locations are missing. Even at the 10 min interval, > 50% of the locations would be missing. Very large data gaps that contribute to much of the missing locations can be excluded from the analysis, therefore, for this tutorial, I will use a 10 min resolution as a compromise between high-resolution information and good temporal coverage.
+
+
+There are several ways to deal with data gaps, and I will address four 
+1. Interpolation (linear or statistical)
+2. Multiple imputation
+3. Nullification
+4. Path segmentation
+
+For large datasets with few and small gaps, the simplest approach to 
+
+## select basic resolution using mode. (10m)
+## address small data gaps with simple crawl (<60m)
+## address large gaps (either split tracks, or assign SL/TA NA)
+
+## fit crawl model
 
 we can get a better picture of the time differences
 ```{r}
-# identify the most frequent dt
-tracks %>% 
-  {table(.$dt)} %>% 
-  {sort(., decreasing = T)[1:10]}
+
 ```
 
 location accuracy (ignoring duplicate locations)
@@ -167,38 +216,6 @@ tracks %>%
 we have to deal with location error, irregular time, and missing locations. we can handle all of these by fitting a Continuous-time correlated random walk (CRW) to the data using the `crawl` package by Devin Johnson and Josh London. A detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>.
 
 
-## selecting a time interval for the HMM
-depends predominantly on the question you are asking. different behaviours occur at different spatial and temporal scales. 
-```{r plot all tracks}
-# convert to lines and plot using tmap
-tracks %>% group_by(ID) %>% 
-  summarise(do_union = F) %>% 
-  st_cast("LINESTRING") %>% 
-     tm_shape() +
-   tm_lines(col = "ID", palette = "Dark2")
-
-```
-
-```{r}
-# first passage time
-tracks_high <- filter(tracks, loc_class %in% c("GPS", 3, 2, 1))
-ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks_high)[,"X"],
-                             st_coordinates(tracks_high)[,"Y"]),
-                  date = tracks_high$time, id=factor(tracks_high$ID))
-fpt_low <- fpt(ltraj, seq(100, 3000, length=100), units = "hours") %>% 
-  varlogfpt() 
-fpt_med <- fpt(ltraj, seq(3000, 20000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt(ltraj, 1500, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-fpt(ltraj, 15000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-fpt(ltraj, 40000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-# looks like there are are increases/plateaus of variance at around 1.5, 15, 40, & 80 km
-```
-
-
-## fit crawl model
 ```{r}
 crawlWrap(tracks, timeStep = "10 min")
 ```
@@ -267,19 +284,31 @@ while(error == T){
 dives <- read.csv("data/dives.csv")
 ```
 
-
-## brainstorm methods to merge data streams (same resolution, hierarchical)
-
-## brainstorm methods to select resolution
-
-## brainstorm methods to fill missing data (NA, linear interpolation, imputation, multiple imputation, track segmentation)
-
-## basic HMM (only locs)
-
-## brainstorm HMM development (dive-only HMM, or add dives to locs, covariates to add; covs to TPM & DS (eg angle bias))
-
-## setup tutorial development issue thread
-
-```{r}
+```{r plot all tracks}
+# convert to lines and plot using tmap
+tracks %>% group_by(ID) %>% 
+  summarise(do_union = F) %>% 
+  st_cast("LINESTRING") %>% 
+     tm_shape() +
+   tm_lines(col = "ID", palette = "Dark2")
 
 ```
+
+```{r}
+# first passage time
+tracks_high <- filter(tracks, loc_class %in% c("GPS", 3, 2, 1))
+ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks_high)[,"X"],
+                             st_coordinates(tracks_high)[,"Y"]),
+                  date = tracks_high$time, id=factor(tracks_high$ID))
+fpt_low <- fpt(ltraj, seq(100, 3000, length=100), units = "hours") %>% 
+  varlogfpt() 
+fpt_med <- fpt(ltraj, seq(3000, 20000, length=200), units = "hours") %>% 
+  varlogfpt()
+fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>% 
+  varlogfpt()
+fpt(ltraj, 1500, units = "hours") %>% unlist %>% mean(na.rm = T)/40
+fpt(ltraj, 15000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
+fpt(ltraj, 40000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
+# looks like there are are increases/plateaus of variance at around 1.5, 15, 40, & 80 km
+```
+
