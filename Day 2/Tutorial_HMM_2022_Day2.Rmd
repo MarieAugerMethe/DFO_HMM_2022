@@ -22,7 +22,9 @@ output:
 -   narwhal data
 
 # import data
+
 First, we'll setup the workspace with required packages
+
 ```{r message=FALSE}
 library(momentuHMM)
 library(dplyr)
@@ -31,6 +33,7 @@ library(lubridate)
 library(adehabitatLT)
 library(sf)
 library(tmap)
+library(units)
 ```
 
 ```{r message=FALSE}
@@ -38,39 +41,188 @@ tracks <- read.csv("data/tracks.csv") %>%
   filter(!is.na(x) & !is.na(y)) %>% # remove missing locations
   mutate(
     time = ymd_hms(time), # define time
-    sameid = id == lead(id),
-    dt = ifelse(id == lead(id), # If next data point is same individual
-      difftime(lead(time), time, units = "mins"), NA), # calculate difference in time
     loc_class = factor(loc_class, # define location class factor levels
-      levels = c("GPS", 3, 2, 1, 0, "A", "B"))) %>%
-  st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
-  st_cast("POINT") %>%
-  st_set_crs(4326) %>% # define CRS
-  st_transform(26918) # reproject data to a UTM
+      levels = c("GPS", 3, 2, 1, 0, "A", "B"))) %>% 
+  filter(!(time == lag(time) & x == lag(x) & y == lag(y) & loc_class == lag(loc_class)))  # remove identical records
+
 ```
 
-The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables 
+The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables
+
 ```{r}
-hist(tracks$dt, 1000)
-hist(subset(tracks, dt < 60 & dt > 0)$dt, 60)
+# calculate time difference between locations
+tracks <- tracks %>%
+  mutate(dt = ifelse(ID == lead(ID), # If next data row is same individual
+    difftime(lead(time), time, units = "mins"), NA
+  )) # calculate time difference
+
+hist(tracks$dt, 1000, main = NA, xlab = "Time difference (min)")
+
+hist(subset(tracks, dt < 60 & dt > 0)$dt, 60, main = NA, xlab = "Time difference (min)")
 ```
 
-```{r message=FALSE}
-# convert to lines/paths
-tracks %>% group_by(id) %>% 
+Next, we'll convert the data to a spatial dataset using the `sf` package and plot the data.
+First, we define the coordinate reference system of the original data (in this case WGS84, which is defined by the EPSG code `4326`). Next, we will project the data into NAD83(CSRS) UTM zone 21N (EPSG:2962), which will projected the coordinates in meter units with minimal distortion for this data set. 
+
+```{r define projection, message=FALSE}
+tracks <- tracks %>%
+  st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
+  st_set_crs(4326) %>% # define CRS
+  st_transform(2962) # reproject data to a UTM
+```
+
+Now, we can map the data using the `tmap` package to visualise what it looks like.
+```{r plot original data, message=FALSE}
+# convert to lines and plot using tmap
+tracks %>% group_by(ID) %>% 
   summarise(do_union = F) %>% 
   st_cast("LINESTRING") %>% 
-  # plot
      tm_shape()+
-   tm_lines(col = "id", palette = "Dark2")
+   tm_lines(col = "ID", palette = "Dark2")
+```
+
+It looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`.
+
+```{r message=FALSE}
+# first, we count the run length of each time step using rle
+run_length <- rle(tracks$dt)$lengths
+# second, we create a sequence of 1:run_length for each time step
+run_seqence <- sequence(run_length)
+# third, we discount each time step that's not a duplicate by multiplying by 0
+run_seqence <- run_seqence*(tracks$dt==0)
+# last, we lag run_sequence by one row and replace the first value by 0,
+# so that we itterate each time that is a duplicate of the previous row
+tracks$duplicate_count <- replace_na(lag(run_seqence), 0)
+# offset duplicate times by 10s
+tracks <- 
+  tracks %>%
+  mutate(time = time + 10*duplicate_count,
+         # recalculate time difference
+         dt = ifelse(ID == lead(ID), 
+    difftime(lead(time), time, units = "mins"), NA
+  ))
+
+# last we ensure there are no identical times
+sum(tracks$time == lead(tracks$time), na.rm = T)
+```
+
+Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location.
+
+```{r speed filter, message=FALSE}
+# distance from previous location 
+delta_dist <- st_distance(tracks, lag(tracks), by_element=TRUE)
+# time from previous location
+delta_t <- set_units(lag(tracks$dt), "min") 
+# calculate speed
+tracks$spd <- delta_dist/delta_t
+
+# filter speed
+tracks <- tracks %>% 
+  filter(spd < set_units(10, "m/s"))
+
+# convert to lines and plot
+tracks %>% group_by(ID) %>% 
+  summarise(do_union = F) %>% 
+  st_cast("LINESTRING") %>% 
+     tm_shape()+
+   tm_lines(col = "ID", palette = "Dark2")
+```
+Already looking much better.
+
+For the first part of this tutorial, we'll use only the fastloc GPS data so we don't have to deal with location error. 
+
+```{r filter and plot gps data, message=FALSE}
+# filter GPS locations only
+tracks_gps <- tracks %>% 
+  filter(loc_class=="GPS")
+
+# plot GPS
+tracks_gps %>% 
+  group_by(ID) %>% 
+  summarise(do_union = F) %>% 
+  st_cast("LINESTRING") %>% 
+     tm_shape() +
+   tm_lines(col = "ID", palette = "Dark2")
+```
+We lose some data, particularly near the end of the tracks, but we will integrate ARGOS locations later in this tutorial.
+
+
+we can get a better picture of the time differences
+```{r}
+# identify the most frequent dt
+tracks %>% 
+  {table(.$dt)} %>% 
+  {sort(., decreasing = T)[1:10]}
+```
+
+location accuracy (ignoring duplicate locations)
+```{r}
+# identify proportion of each location class
+tracks %>% 
+  filter(dt > 0) %>% 
+  {table(.$loc_class)/nrow(tracks)} 
 ```
 
 
+we have to deal with location error, irregular time, and missing locations. we can handle all of these by fitting a Continuous-time correlated random walk (CRW) to the data using the `crawl` package by Devin Johnson and Josh London. A detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>.
+
+
+## selecting a time interval for the HMM
+depends predominantly on the question you are asking. different behaviours occur at different spatial and temporal scales. 
+```{r plot all tracks}
+# convert to lines and plot using tmap
+tracks %>% group_by(ID) %>% 
+  summarise(do_union = F) %>% 
+  st_cast("LINESTRING") %>% 
+     tm_shape() +
+   tm_lines(col = "ID", palette = "Dark2")
+
+```
+
+```{r}
+# first passage time
+tracks_high <- filter(tracks, loc_class %in% c("GPS", 3, 2, 1))
+ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks_high)[,"X"],
+                             st_coordinates(tracks_high)[,"Y"]),
+                  date = tracks_high$time, id=factor(tracks_high$ID))
+fpt_low <- fpt(ltraj, seq(100, 3000, length=100), units = "hours") %>% 
+  varlogfpt() 
+fpt_med <- fpt(ltraj, seq(3000, 20000, length=200), units = "hours") %>% 
+  varlogfpt()
+fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>% 
+  varlogfpt()
+fpt(ltraj, 1500, units = "hours") %>% unlist %>% mean(na.rm = T)/40
+fpt(ltraj, 15000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
+fpt(ltraj, 40000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
+# looks like there are are increases/plateaus of variance at around 1.5, 15, 40, & 80 km
+```
+
+
+## fit crawl model
+```{r}
+crawlWrap(tracks, timeStep = "10 min")
+```
+
+We will provide a prior distribution for each of the location quality classes. The `crawl::crwMLE()` function accepts a function for the ‘prior’ argument. In this example, we provide a normal distribution of the log-transformed error. The standard error of 0.2
 ```{r message=FALSE}
 
+prior <- function(p) {
+  dnorm(p[1], log(50), 0.2, log = TRUE) +  # GPS
+  dnorm(p[2], log(250), 0.2, log = TRUE) +  # 3
+  dnorm(p[3], log(500), 0.2, log = TRUE) +  # 2
+  dnorm(p[4], log(1500), 0.2, log = TRUE) +  # 1
+  dnorm(p[5], log(2500), 0.4, log = TRUE) +  # 0
+  dnorm(p[6], log(2500), 0.4, log = TRUE) +  # A
+  dnorm(p[7], log(2500), 0.4, log = TRUE) +  # B
+  # skip p[8] as we won't provide a prior for sigma
+  dnorm(p[9], -4, 2, log = TRUE)  # beta parameter 
+}
 
+```
+In addition to prior distributions for the location quality classes, we can also provide a prior distribution for the beta parameter. We suggest a normal distribution with a mean of -4 and a standard deviation of 2. This encourages the model to fit a smoother track unless the data warrant a rougher, more Brownian, path.
 
-
+See the crawl tutorial for using fir
+```{r message=FALSE}
 # # plot with ggplot
 # tracks %>% 
 #   mutate(x = st_coordinates(tracks)[,"X"],  # convert back to dataframe
@@ -82,11 +234,11 @@ tracks %>% group_by(id) %>%
 if (require(shiny) && require(shinyjs)) {
      tmaptools::palette_explorer()
 }
+```
 
-#### impute missing locations ####
-# offset duplicate times by 10s
-tracks <- tracks %>%
-  mutate(time = time + 10*replace_na(lag(cumsum(dt==0)*(dt==0)), 0))
+
+```{r Create a Nested Data Structure, message=FALSE}
+## impute missing locations #
 
 # course speed filter
 tracks %>% 
@@ -108,35 +260,26 @@ while(error == T){
   )
 }
 
-# first passage time
-tracks <- filter(tracks, dt !=0, Loc.Class %in% c("GPS", 3, 2))
-ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks)[,"X"],
-                             st_coordinates(tracks)[,"Y"]),
-                  date = tracks$time, id=factor(tracks$DeployID))
-fpt_low <- fpt(ltraj, seq(100, 5000, length=100), units = "hours") %>% 
-  varlogfpt() TT 
-fpt_med <- fpt(ltraj, seq(5000, 20000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt_max <- fpt(ltraj, seq(100000, 150000, length=100), units = "hours") %>% 
-  varlogfpt()
-fpt(ltraj, 40000, units = "hours") %>% plot(40000)
-# looks like there are are increases/plateaus of variance at around 1.5, 13, 40, & 80 km
+
 ```
 
 ```{r Load data, warning=FALSE}
 dives <- read.csv("data/dives.csv")
 ```
-## different resolutions, different questions
-## visualise data
-## assess data structure (resolution/gaps)
+
+
 ## brainstorm methods to merge data streams (same resolution, hierarchical)
+
 ## brainstorm methods to select resolution
+
 ## brainstorm methods to fill missing data (NA, linear interpolation, imputation, multiple imputation, track segmentation)
+
 ## basic HMM (only locs)
+
 ## brainstorm HMM development (dive-only HMM, or add dives to locs, covariates to add; covs to TPM & DS (eg angle bias))
+
 ## setup tutorial development issue thread
+
 ```{r}
 
 ```
