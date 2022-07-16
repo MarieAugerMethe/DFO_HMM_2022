@@ -34,8 +34,10 @@ library(adehabitatLT)
 library(sf)
 library(tmap)
 library(units)
+library(stringr)
 ```
 
+For simplicity, we will also only look at the data for the month of August, 2017.
 ```{r message=FALSE}
 tracks <- read.csv("data/tracks.csv") %>%
   filter(!is.na(x) & !is.na(y)) %>% # remove missing locations
@@ -43,7 +45,10 @@ tracks <- read.csv("data/tracks.csv") %>%
     time = ymd_hms(time), # define time
     loc_class = factor(loc_class, # define location class factor levels
       levels = c("GPS", 3, 2, 1, 0, "A", "B"))) %>% 
-  filter(!(time == lag(time) & x == lag(x) & y == lag(y) & loc_class == lag(loc_class)))  # remove identical records
+  # remove identical records
+  filter(!(time == lag(time) & x == lag(x) & y == lag(y) & loc_class == lag(loc_class)),
+  # filter only the month of august
+  month(time) == 8, day(time) > 7,  day(time) <= 14)
 
 ```
 
@@ -171,7 +176,6 @@ p_na <- function(t_0, t_max, n_loc, resolution) {
  track_summary <-
     tracks_gps %>% st_drop_geometry() %>% 
   # limit to core period with data
-  filter(time >= ymd("2017-8-1") & time <= ymd("2017-8-31")) %>% 
   group_by(ID) %>% 
     filter(dt >= 1) %>% # remove duplicate time (just for this stage)
     summarise(n_loc = n(), # number of locations
@@ -191,7 +195,89 @@ There are several ways to deal with data gaps, and I will address four
 3. Nullification
 4. Path segmentation
 
-For large datasets with few and small gaps, the simplest approach to 
+For large datasets with few and small gaps, the simplest approach to use linear interpolation. First, let's identify thy most likely minute we have data.
+```{r}
+# which minute has the most data
+tracks_gps %>% 
+  st_drop_geometry() %>%  # must convert back to data.frame
+  group_by(ID) %>% 
+  summarise(minute = str_sub(minute(time),-1)) %>% 
+  table()
+```
+It looks like for all three tracks, the most amount of locations fall on 0 min  (i.e., 10, 20, 30, 40, 50, 60 min). Next, for each track, we will create a vector of times in which to estimate locations.
+
+```{r linear interpolation}
+# convert tracks back to data.frame with xy coordinates
+tracks_gps_list <- tracks_gps %>% 
+  mutate(x = st_coordinates(tracks_gps)[,"X"],  
+         y = st_coordinates(tracks_gps)[,"Y"]) %>%
+  st_drop_geometry() %>% 
+    split(.,.$ID)  # split into list
+
+# create full time series on which to estimate locations rounded to the nearest 10 min
+tracks_gps_list_time <- tracks_gps %>% 
+  st_drop_geometry() %>%  # convert to data.frame
+  group_by(ID) %>%
+  summarise(time = seq(round_date(first(time), "10 min"), 
+                       round_date(last(time), "10 min"),
+                       by = 60*10)) %>% 
+  split(.,.$ID)  # split into list
+```
+
+Now, we can interpolate the locations for each track.
+
+```{r linear interpolation}
+# function to create a data frame with approximated locations
+approx_locs <- function(tracks, times){
+  data.frame(ID = times$ID,
+        time = times$time,
+        x = approx(tracks$time, tracks$x,
+                   xout = times$time)$y,
+        y = approx(tracks$time, tracks$y,                               
+                   xout = times$time)$y)
+}
+
+# Interpolate the location at the times from the sequence
+tracks_gps_linear <- mapply(approx_locs, tracks_gps_list, tracks_gps_list_time,
+                          SIMPLIFY = F) %>% 
+  do.call("rbind", .)  # convert list of tracks back to a single data.frame
+
+# remove row names added by rbind
+rownames(tracks_gps_linear) <- NULL 
+
+# plot locations
+plot(tracks_gps_linear$x, tracks_gps_linear$y, pch = 20, col = "red", xlab = "x", ylab = "y", asp = 1)
+points(st_coordinates(tracks_gps)[,"X"], st_coordinates(tracks_gps)[,"Y"], pch = 20)
+```
+Looks like it works. Let's try fitting an HMM to this. First, lets preparte the data using `prepData` and plot the data to estimate starting parameters.
+
+```{r linear HMM prep}
+prep_gps_linear <- prepData(tracks_gps_linear, type = "UTM")
+
+plot(prep_gps_linear)
+```
+
+
+```{r linear HMM starting pars}
+# Setting up the starting values
+mu0 <- c(50, 500) # Mean step length
+sigma0 <- c(50, 500) # Sd of the step length
+kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
+```
+
+Ok, were are ready. Let's fit the HMM
+
+```{r linear HMM fitHMM, message=FALSE}
+set.seed(1)
+# Fit a 2 state HMM
+GPS_linear <- fitHMM(prep_gps_linear, nbState = 2, dist = list(step = "gamma",
+angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0), formula = ~ 1)
+
+plot(GPS_linear)
+```
+
+
+Unfortunately, if we fit an HMM to this data, it would likely classify 
 
 ## select basic resolution using mode. (10m)
 ## address small data gaps with simple crawl (<60m)
