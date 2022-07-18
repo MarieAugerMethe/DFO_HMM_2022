@@ -35,6 +35,7 @@ library(sf)
 library(tmap)
 library(units)
 library(stringr)
+require("conicfit")
 ```
 
 For simplicity, we will also only look at the data for the month of August, 2017.
@@ -254,7 +255,7 @@ Looks like it works. Let's try fitting an HMM to this. First, lets preparte the 
 ```{r linear HMM prep}
 prep_gps_linear <- prepData(tracks_gps_linear, type = "UTM")
 
-plot(prep_gps_linear)
+plot(prep_gps_linear, ask = F)
 ```
 
 
@@ -270,16 +271,55 @@ Ok, were are ready. Let's fit the HMM
 ```{r linear HMM fitHMM, message=FALSE}
 set.seed(1)
 # Fit a 2 state HMM
-GPS_linear <- fitHMM(prep_gps_linear, nbState = 2, dist = list(step = "gamma",
+HMM_gps_linear <- fitHMM(prep_gps_linear, nbState = 2, dist = list(step = "gamma",
 angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0), formula = ~ 1)
 
-plot(GPS_linear)
+plot(HMM_gps_linear, ask = F)
 ```
 
+That model does not look good. It's clear from the mapped states that state 1 largely represents the original data, while state 2 primarily represents the interpolated data. This is a common problem when data gaps are frequent or large such that the information in the interpolated data outweighs the signal from the original observations. Generally, I would only use linear interpolation when data gaps are small (< 3 locations) or relatively infrequent (< 20 \% of the modelled locations). In our data, some gaps are > 5 hours (30 locations) and > 50\% of the modelled locations are interpolated. So we need to use another approach.
 
-Unfortunately, if we fit an HMM to this data, it would likely classify 
+A slightly better way to interpolate locations is to fit a correlated random walk (CRW) model to the data and predict the most likely locations. `momentuHMM` contains wrapper functions to interpolate missing locations by fitting continuous-time CRW to the data based on the `crawl` package by Devin Johnson and Josh London. There are many options to fit the `crawl` model, and a detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>. Let's try to fit the most basic model using the wrapper function `crawlWrap`.
 
-## select basic resolution using mode. (10m)
+```{r crawl 10 min gps}
+# fit crawl
+crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
+# plot fit tracks
+plot(crw_gps_10, ask = F)
+```
+Notice how the predicted tracks do not make perfectly straight lines through missing sections (particularly noticeable in T172062). Next, we will extract the predicted locations and add them to the observed data.
+
+```{r crawl predict 10 min}
+# filter predicted locations, convert CRS, 
+tracks_gps_crw <- data.frame(crw_gps_10$crwPredict) %>% 
+  filter(locType == "p") %>% 
+  dplyr::select(mu.x, mu.y, time,
+         ID) %>% 
+  dplyr::rename(x = "mu.x", y = "mu.y")
+```
+
+Now, let's try to fit the same HMM as before on this data using the same starting parameters.
+
+```{r crawl HMM fitHMM, message = FALSE}
+set.seed(1)
+# prep data 
+prep_gps_crw <- prepData(tracks_gps_crw, type = "UTM")
+
+# Setting up the starting values
+mu0 <- c(50, 500) # Mean step length
+sigma0 <- c(50, 500) # Sd of the step length
+kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
+
+# Fit a 2 state HMM
+HMM_gps_crw <- fitHMM(prep_gps_crw, nbState = 2, dist = list(step = "gamma",
+    angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0))
+
+plot(HMM_gps_crw, ask = F)
+```
+That's looking much better. 
+
+
+
 ## address small data gaps with simple crawl (<60m)
 ## address large gaps (either split tracks, or assign SL/TA NA)
 
@@ -299,7 +339,7 @@ tracks %>%
 ```
 
 
-we have to deal with location error, irregular time, and missing locations. we can handle all of these by fitting a Continuous-time correlated random walk (CRW) to the data using the `crawl` package by Devin Johnson and Josh London. A detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>.
+we have to deal with location error, irregular time, and missing locations. we can handle all of these by fitting a 
 
 
 ```{r}
