@@ -39,7 +39,7 @@ require("conicfit")
 ```
 
 For simplicity, we will also only look at the data for the month of August, 2017.
-```{r message=FALSE}
+```{r import tracks, message=FALSE}
 tracks <- read.csv("data/tracks.csv") %>%
   filter(!is.na(x) & !is.na(y)) %>% # remove missing locations
   mutate(
@@ -55,7 +55,7 @@ tracks <- read.csv("data/tracks.csv") %>%
 
 The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables
 
-```{r}
+```{r calc dt}
 # calculate time difference between locations
 tracks <- tracks %>%
   mutate(dt = ifelse(ID == lead(ID), # If next data row is same individual
@@ -316,19 +316,86 @@ HMM_gps_crw <- fitHMM(prep_gps_crw, nbState = 2, dist = list(step = "gamma",
 
 plot(HMM_gps_crw, ask = F)
 ```
-That's looking much better. 
+That's looking much better. It looks like state 1 represents a low-speed, high tortuosity resident state, while state 2 reperesents higher-speed, low tortuosity travelling state. In many instances, this model may be sufficient. However, because we do have such a large amount of interpolated locations, they represent a significant amount of the fitted data and may skew the representation of the states. For example, the large interpolated gaps are still relatively straightened out and a very consistent speed, and may skew the definition of state 2 in particular. There are different ways to deal with this, one of which is to simply keep it in mind when interpreting the results and subsequent analyses. However, here I propose one strategy by nullifying the data streams (i.e., step length and turning angle) during moderate/large interpolated gaps where we expect that the estimated movement has is largely independent of the observed data before or after the gap. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. In this case, I will nullify predicted locations in gaps larger than 60 min. First, we will identify which steps need to be nullified
 
 
+```{r id nullify gaps}
+# identify which data gaps are >=60 min for each track
+list_60mim_gps <- lapply(tracks_gps_list, function(x){
+  which(difftime(lead(x$time), x$time, units = "mins")>=60)
+})
 
-## address small data gaps with simple crawl (<60m)
-## address large gaps (either split tracks, or assign SL/TA NA)
+# create sequence of times for each track from gaps >= 60 min
+gap_list <- mapply(FUN = function(track, gaps){
+  # edentify start and end date of each gap
+  gaps_list_SE <- list(start = ceiling_date(track$time[gaps], "10 min"), 
+                    end = floor_date(track$time[gaps+1], "10 min"))
+  # create sequence by 10 min for each gap
+  gaps_list <- mapply(function(start, end){
+    seq(start, end, by = 60*10)}, gaps_list_SE$start, gaps_list_SE$end)
+  # combine into single vector for each track
+  do.call("c", gaps_list)
+  },
+  tracks_gps_list, list_60mim_gps)
+```
 
-## fit crawl model
+Next, we will prep the data and nullify the estimated step and angle in gaps >= 60 min.
+```{r prep data & nullify gaps}
+# prep data and list by ID
+prep_gps_crw_NAgaps <- prepData(tracks_gps_crw, type = "UTM") %>% 
+  {split(., .$ID)}
 
-we can get a better picture of the time differences
-```{r}
+# crate function to replace step and turn angle of large gaps with NA
+NA_gaps <- function(tracks, times){
+  tracks$step[tracks$time %in% times] <- NA
+  tracks$angle[tracks$time %in% times] <- NA
+  return(tracks)
+}
+
+# Interpolate the location at the times from the sequence
+prep_tracks_gps_crw_NAgaps <- mapply(FUN = NA_gaps, prep_gps_crw_NAgaps, gap_list,
+                          SIMPLIFY = F) %>% 
+  do.call("rbind", .)  # convert list of tracks back to a single data.frame
 
 ```
+
+Now, let's try to fit the same HMM as above to this data with large gaps nullified. 
+
+```{r nullified crawl HMM fitHMM, message = FALSE}
+set.seed(1)
+# Setting up the starting values
+mu0 <- c(50, 500) # Mean step length
+sigma0 <- c(50, 500) # Sd of the step length
+kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
+
+# Fit a 2 state HMM
+HMM_gps_crw_NAgaps <- fitHMM(prep_tracks_gps_crw_NAgaps, nbState = 2, dist = list(step = "gamma", angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0))
+
+plot(HMM_gps_crw_NAgaps, ask = F)
+```
+Visually, the difference is subtle.
+
+```{r}
+HMM_gps_crw$mle[c("step", "angle")]
+HMM_gps_crw_NAgaps$mle[c("step", "angle")]
+```
+The estimated parameters are quite different whether you account for the large gaps in data. When you nullify large gaps, the mean step length for both states is higher, and the turn angle concentration parameters is lower for both states (i.e., more tortuous). The fact that the parameters change for both states, suggests that the large gaps skewed the parameterisation of both states.
+
+Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the the ID column. We will not implement this approach in this tutorial, however, it can be done using the following code:
+```{r track segmentation}
+gap_thresh <- 3*60 # in hours (3h for illustration)
+# gaps no more than 6h per segment
+new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%  # if dif.time > gap_thresh or new ID
+  replace_na(TRUE) %>%  # replace first NA with ID = 1
+  cumsum() %>%  # iterate ID 
+  paste(tracks_gps$ID, ., sep = "_")
+# then smaller gaps <= gap_thresh can be interpolated with crawlWrap
+```
+
+## Dealing with location error and irregular time
+Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular timeseries. 
+
+
 
 location accuracy (ignoring duplicate locations)
 ```{r}
