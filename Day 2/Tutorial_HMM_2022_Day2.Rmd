@@ -401,7 +401,7 @@ new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%
 ```
 
 ## Dealing with location error and irregular time
-Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular timeseries. 
+Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series. 
 
 location accuracy (ignoring duplicate locations)
 ```{r}
@@ -666,7 +666,7 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
 `step` and `angle` seem quit independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, se we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`. 
 
 To get starting parameters, we can fit an HMM to each one independently. We will use the gamma distribution for both and for now will use the same starting parameters.
-```{r}
+```{r prep dive data and independent HMMs, message=FALSE}
 # identify whether there is 0 data
 tracks_dives %>% 
   summarise(max_dep = sum(max_dep == 0, na.rm = T), 
@@ -681,12 +681,130 @@ zm <- c(0.1, 0.1)  # zero mass, where applicable
 # fit dive-only HMMs
 set.seed(1)
 HMM_max_dep <- fitHMM(tracks_dives, nbStates = 2, dist = list(max_dep = "gamma"), 
-                      Par0 = list(max_dep = c(mu0, sigma0)), retryFits = 5)
+                      Par0 = list(max_dep = c(mu0, sigma0)))
 HMM_bott_dist <- fitHMM(tracks_dives, nbStates = 2, dist = list(bott_dist = "gamma"), 
-                        Par0 = list(bott_dist = c(mu0, sigma0, zm)), retryFits = 5)
+                        Par0 = list(bott_dist = c(mu0, sigma0, zm)))
 ```
-Next, we can integrate these into one HMM together
+Next, we can integrate these into one HMM together with step length and turning angle. When we specify the starting parameters, we want to think about how the states may look. For example, we might expect one resident state with slower movement, lower angular concentration, deeper dives, and greater at-depth variability. The second state may be travel, with faster movement, greater angular concentration, shallower dives, and less  at-depth variability.
 
+```{r prep data for dive & move HMM}
+# prep model
+stateNames = c("resident", "travel")
+nbStates = length(stateNames)
+dist = list(step = "gamma", angle = "vm", max_dep = "gamma", bott_dist =  "gamma")
+
+# Starting Pars 
+  # view Pars from previous HMMs
+  getPar(HMM_gps_crw_NAgaps)$Par  # state 1 ~ resident, state 2 ~ travel
+  getPar(HMM_max_dep)$Par  # state 1 ~ travel, state 2 ~ resident
+  getPar(HMM_bott_dist)$Par  # state 1 ~ travel, state 2 ~ resident
+  # therefore must switch parameter estimates in HMM_max_dep & HMM_bott_dist
+  
+  # combine starting Pars 
+  step0 <- getPar(HMM_gps_crw_NAgaps)$Par$step
+  angle0 <- getPar(HMM_gps_crw_NAgaps)$Par$angle
+  max_dep0 <- c(getPar(HMM_max_dep)$Par$max_dep[c(2,1)],  # mu1, mu2
+                getPar(HMM_max_dep)$Par$max_dep[c(4,3)])  # sd1, sd2
+  bott_dist0 <- c(getPar(HMM_bott_dist)$Par$bott_dist[c(2,1)],  # mu1, mu2
+                  getPar(HMM_bott_dist)$Par$bott_dist[c(4,3)],  # sd1, sd2
+                  getPar(HMM_bott_dist)$Par$bott_dist[c(6,5)])  # zm1, zm2
+  Par0 <- list(step = step0, angle = angle0, max_dep = max_dep0, bott_dist = bott_dist0)
+```
+
+Now, we can fit the HMM with movement and dive variables.
+```{r fit move & dive HMM, message=F}
+set.seed(1)
+HMM_move_dive <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
+```
+
+Let's see what it looks like.
+```{r view HMM_move_dive}
+plot(HMM_move_dive, breaks = 100, ask = F)
+plotPR(HMM_move_dive)
+```
+The tracks look interesting. But there are some issues in the pseudo residuals.
+Looking at the QQ plots the model appears to:
+- overestimate the number of fast movement steps
+- underestimating higher turning angles
+- underestimate shallow dives and over estimate deep dives
+- really wonky description of `bott_dist`
+The autocorrelation functions suggest there is remnant autocorrelation in `step` and `max_dep` that are not well described by the model. Together, this information suggests that there may be additional states that are not represented. Let's try to add one more state with an intermediate speed, lower angle concentration, and shallow dives.
+```{r 3-state dive & move HMM, message=FALSE}
+# define states
+stateNames <- c("resident", "travel", "search")
+nbStates <- length(stateNames)
+
+# Starting Pars 
+  # get Pars from last HMM_move_dive HMM
+  Pars <- getPar(HMM_move_dive)$Par 
+
+  # combine starting Pars 
+  step0 <- c(Pars$step[c(1,2)], mean(Pars$step[c(1,2)]),  # mu
+             Pars$step[c(3,4)], mean(Pars$step[c(3,4)]))  # sd
+  angle0 <- c(Pars$angle, 3)
+  max_dep0 <- c(Pars$max_dep[c(1,2)], 25, # mu
+                Pars$max_dep[c(3,4)], 10) # sd
+  bott_dist0 <- c(Pars$bott_dist[c(1,2)], mean(Pars$bott_dist[c(1,2)]), # mu
+                  Pars$bott_dist[c(3,4)], mean(Pars$bott_dist[c(3,4)]), # sd
+                  Pars$bott_dist[c(5,6)], mean(Pars$bott_dist[c(5,6)]))# zm
+  Par0 <- list(step = step0, angle = angle0, max_dep = max_dep0, bott_dist = bott_dist0)
+
+# fit 3-state HMM
+set.seed(1)
+HMM_move_dive_3s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
+```
+
+```{r review 3-state HMM}
+plotPR(HMM_move_dive_3s)
+plot(HMM_move_dive_3s, breaks = 100, ask = F)
+```
+Interestingly, the `step` and `angle` QQ-plots were not improved much, though the `step` ACF was improved. However, compared to the 2-state model, there was a drastic improvement in QQ-plot and ACF the `max_dep` data stream and marginal improvement in the `bott_dist` data stream. The newly described state appears to have very low step length, really wide turning angle, minimal diving, and minimal at-depth activity, which may actually be indicative of resting. The "resident" state has intermediate speed and turning angle, but very deep dives and high at-depth activity, suggesting it may represent foraging. Let's try to fit one more 4-state HMM, to try and address the remaining residuals: intermediate speed, lower angle concentration, and more intermediate dives, which may represent searching behaviour.
+```{r 4-state HMM}
+# define states
+stateNames <- c("forage", "travel", "rest", "search")
+nbStates <- length(stateNames)
+# Starting Pars 
+  # get Pars from last HMM_move_dive HMM
+  Pars <- getPar(HMM_move_dive_3s)$Par 
+
+  # combine starting Pars 
+  step0 <- c(Pars$step[c(1:3)], mean(Pars$step[3]),  # mu
+             Pars$step[c(4:6)], mean(Pars$step[6]))  # sd
+  angle0 <- c(Pars$angle, Pars$angle[3])
+  max_dep0 <- c(Pars$max_dep[c(1:2)], Pars$max_dep[3]/2, Pars$max_dep[3], # mu
+                Pars$max_dep[c(4:5)], Pars$max_dep[6]/2, Pars$max_dep[6]) # sd
+  bott_dist0 <- c(Pars$bott_dist[c(1:3)], Pars$bott_dist[3], # mu
+                  Pars$bott_dist[c(4:6)], Pars$bott_dist[6], # sd
+                  Pars$bott_dist[c(7:9)], Pars$bott_dist[9]) # zm
+  Par0 <- list(step = step0, angle = angle0, max_dep = max_dep0, bott_dist = bott_dist0)
+
+# fit 3-state HM
+set.seed(1)
+HMM_move_dive_4s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
+
+# view output
+plotPR(HMM_move_dive_4s)
+plot(HMM_move_dive_4s, breaks = 200)
+```
+The QQ-plot for `step` is quite a bit improved, as is for `bott_dist`. The ACF for `step` is also quite improved. At this point, I'm not sure the model can be significantly improved with the existing data. Although HMMs with different number of states generally shouldn't be compared, since AIC generally favours more states, it is a good sanity check. 
+```{r HMM state AIC}
+AIC(HMM_move_dive, HMM_move_dive_3s, HMM_move_dive_4s)
+```
+
+
+
+## play
+```{r}
+# plot states
+model <- HMM_max_dep
+dat <- tracks_dives %>% 
+  mutate(max_dep = (max_dep),
+         bott_dist = (bott_dist),
+         state = viterbi(model)) %>% 
+  dplyr::select(max_dep, bott_dist, step, angle, state) 
+
+plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1)
+```
 
 One additional option to select which dive data stream to use, is to  and examine which performs better. All of dive data streams are zero-bound, therefore, we can the gamma, log normal, or Weibull distrutions to describe them. For simplicity, we will use the gamma for all, and also divide each data stream by its respective standard deviation to standardise them. 
 
@@ -771,6 +889,50 @@ pairs.panels(tracks_dives_prep[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep
              "bott_dist", "step", "angle")],
              gap = 0,
              pch=21)
+
+pairs.panels(cbind(tracks_dives_prep[,c("max_dep", "bott_dist", "step")],
+                   abs(tracks_dives_prep[,c("angle")])),
+             gap = 0,
+             pch=20)
+# plot states
+dat <- tracks_dives_prep %>% 
+  mutate(max_dep = log(max_dep),
+         bott_dist = log(bott_dist),
+         state = viterbi(HMM_move_dive_3s)) %>% 
+  dplyr::select(max_dep, bott_dist, step, angle, state) 
+ggplot(dat, aes(x = step, y = angle, col = state)) + 
+  geom_point(shape = 20)
+ggplot(dat, aes(x = step, y = max_dep, col = state)) + 
+  geom_point(shape = 20)
+library(plotly)
+plot_ly(dat, x = ~log(step), y = ~abs(angle), z = ~-max_dep, color = ~factor(state), size = 1)
+plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,  size = 1)
+plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1)
+plot_ly(dat, x = ~log(step), y = ~bott_dist, z = ~-max_dep,color = ~factor(state),  size = 1)
+
+plot_ly(dat, x = ~step, y = ~max_dep, z = ~bott_dist, size = 1)
+plot_ly(dat, x = ~abs(angle), y = ~max_dep, z = ~bott_dist, size = 1)
+
+# PCA
+dat <- tracks_dives_prep %>% 
+  mutate(max_dep = log(max_dep),
+         bott_dist = log(bott_dist),
+         state = viterbi(HMM_move_dive_3s)) %>% 
+  dplyr::select(max_dep, bott_dist, step, angle) %>% 
+  na.omit() %>% 
+  {.[!is.infinite(rowSums(.)),]}
+
+pairs.panels(dat,
+             
+             gap = 0,
+             pch=20)
+pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "bott_dist", "step", "angle")])),
+                         c("max_dep", "bott_dist", "step", "angle")]),
+             center = TRUE,
+            scale. = TRUE)
+print(pc)
+ggplot(dat, aes(x = step, y = angle, col = state)) + 
+  geom_point()
 # PCA
 dat <- tracks_dives_prep %>% 
   mutate(mean_dep = log(mean_dep),
