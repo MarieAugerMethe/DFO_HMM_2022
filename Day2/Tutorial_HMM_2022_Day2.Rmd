@@ -21,12 +21,11 @@ Our main objectives are to handle some of the common data problems encountered w
 
 -   Including diving covariates
 
-# import data
+# Loading the required packages
 
-First, we'll setup the workspace with required packages
-set working directory to "Day 2" of the HMM workshop if it is not already using `setwd("Day 2/")`.
+First, we'll setup the workspace with required packages.
 
-```{r message=FALSE}
+```{r, message=FALSE}
 library(momentuHMM)
 library(dplyr)
 library(tidyr)
@@ -44,6 +43,20 @@ library(mitools)
 library(doFuture)
 library(corrplot)  # Pearson's correlation matrix using cor()
 ```
+
+<!-- MAM: to be able to compile you need to put all the code in the chunks -->
+
+Please also set working directory to "Day2" of the HMM workshop:
+
+```{r, message=FALSE}
+setwd("Day2")
+```
+
+# Import data
+
+<!-- MAM: If you onlye use the August data throughout, create a file that has just the August data.  -->
+<!-- MAM: also here explain the different data manipulation steps (e.g., NA, location class).  -->
+<!-- That's actually quite important in this tutorial about messy data. -->
 
 For simplicity, we will also only look at the data for the month of August, 2017.
 ```{r import tracks, message=FALSE}
