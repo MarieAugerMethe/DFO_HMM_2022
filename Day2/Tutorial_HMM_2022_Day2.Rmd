@@ -42,7 +42,7 @@ require("conicfit")
 require("car")
 require("mitools")
 require("doFuture")
-library(corrplot)  # Paerson's correlation matrix using cor()
+library(corrplot)  # Pearson's correlation matrix using cor()
 ```
 
 For simplicity, we will also only look at the data for the month of August, 2017.
