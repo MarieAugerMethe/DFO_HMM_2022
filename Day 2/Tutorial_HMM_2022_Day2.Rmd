@@ -24,6 +24,7 @@ output:
 # import data
 
 First, we'll setup the workspace with required packages
+set working directory to "Day 2" of the HMM workshop if it is not already using `setwd("Day 2/")`.
 
 ```{r message=FALSE}
 library(momentuHMM)
