@@ -11,15 +11,15 @@ output:
 
 # Tutorial goals and set up
 
-## objectives
+## Objectives
 
--   Dealing irregular locations,
+Our main objectives are to handle some of the common data problems encountered with marine movement and diving data, using a narwhal dataset provided by Dr. Marianne Marcoux. Specifically, we aim to address the following:
 
--   time gaps,
+-   Irregular locations
 
--   including diving covariates
+-   Time gaps
 
--   narwhal data
+-   Including diving covariates
 
 # import data
 
