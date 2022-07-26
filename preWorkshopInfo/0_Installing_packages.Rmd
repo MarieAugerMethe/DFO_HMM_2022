@@ -4,9 +4,8 @@ subtitle: "Tips to install some of the packages"
 author: "Joe Watson, Ron Togunov, & Marie Auger-Méthé"
 date: "26/07/2022"
 output: 
-  html_document:
-    css: "CSSdefs.css"
-    after_body: footer.html
+    html_document:
+    number_sections: true
 ---
 
 
@@ -27,7 +26,7 @@ You can install Xcode directly from the App store (it's free).
 
 You can also install it via terminal, but because it is a very large program it's worth checking if you already have it installed. If not, open terminal and run:
 
-```{r,eval=F}
+```{r, eval=FALSE}
 xcode-select --install
 ```
 
@@ -35,13 +34,13 @@ For Windows, installing Rtools is an easy way to install compilers. Rtools is fo
 
 For Linux, the necessary compilers are installed by default with R. To double check they are installed run:
 
-```{r,eval=F}
+```{r, eval=FALSE}
 gcc --version
 ```
 
 If nothing is returned, then they can be installed manually as follows:
 
-```{r,eval=F}
+```{r, eval=FALSE}
 sudo apt update
 sudo apt install build-essential
 ```
@@ -57,7 +56,7 @@ If you do not have these software already installed, please install them (see be
 
 On Mac, installing these is easiest done using homebrew ([brew.sh](https://brew.sh/)). With homebrew installed, open terminal and run:
 
-```{r,eval=F}
+```{r, eval=FALSE}
 brew tap osgeo/osgeo4mac && brew tap --repair
 brew install pkg-config
 brew install proj
@@ -68,7 +67,7 @@ brew install gdal
 On Windows, express install osgeo4w by following the instruction found at  [trac.osgeo.org/osgeo4w](https://trac.osgeo.org/osgeo4w/). This will install the PROJ, GDAL, and GEOS libraries.
 
 On Linux, run the following in the terminal:
-```{r,eval=F}
+```{r, eval=FALSE}
 sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable
 sudo apt-get update
 sudo apt-get install libudunits2-dev libgdal-dev libgeos-dev libproj-dev 
@@ -79,7 +78,7 @@ sudo apt-get install libudunits2-dev libgdal-dev libgeos-dev libproj-dev
 
 The latest version of sf and terra are **required**. The workshop material **will not work without these**. These can be installed **after** the latest GIS software has been installed.
 
-```{r,eval=F}
+```{r, eval=FALSE}
 install.packages(c('sf', 'terra', 'tmap'), dep=TRUE)
 ```
 
@@ -106,7 +105,7 @@ The remaining packages do not have special dependencies, and should be easily in
 
 Once all the packages are installed, you can check that they are properly installed by loading them.
 
-```{r warning=FALSE, message=FALSE, error=FALSE, eval=FALSE}
+```{r, warning=FALSE, message=FALSE, error=FALSE, eval=FALSE}
 library(sf)
 library(terra)
 library(tmap)
