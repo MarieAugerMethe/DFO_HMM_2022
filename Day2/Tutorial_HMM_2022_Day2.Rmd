@@ -371,7 +371,7 @@ prep_tracks_gps_crw_NAgaps <- prepData_NAGaps(tracks_gps_ls, tracks_gps_crw, 10,
 
 Now, let's try to fit the same HMM as above to this data with large gaps nullified. 
 
-```{r nullified crawl HMM fitHMM, message = FALSE}
+```{r nullified_crawl_HMM_fitHMM, message=FALSE}
 set.seed(1)
 # Setting up the starting values
 mu0 <- c(50, 500) # Mean step length
