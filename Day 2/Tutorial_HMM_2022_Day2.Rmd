@@ -546,9 +546,52 @@ Both data sets seem to fit easily. There isn't a large change between this GPS m
 
 ### Multiple imputation
 ```{r fit multiple imputations}
+
+# define priors
+prior <- function(p) {
+  dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
+  dnorm(p[2], log(500),  0.2, log = TRUE) +  # 2
+  dnorm(p[3], log(1500), 0.2, log = TRUE) +  # 1
+  dnorm(p[4], log(2500), 0.4, log = TRUE) +  # 0
+  dnorm(p[5], log(2500), 0.4, log = TRUE) +  # A
+  dnorm(p[6], log(2500), 0.4, log = TRUE) +  # B
+  # skip p[7] as we won't provide a prior for sigma
+  dnorm(p[8], 4, 2, log = TRUE)  # beta parameter 
+}
+
+# fit crawl model and predict locations at 45 min time steps
+set.seed(1)
+argos_45_crwOut <- crawlWrap(tracks_argos,
+  timeStep = "45 min",
+  retryFits = 1, Time.name = "time",
+  err.model = err.model,
+  prior = prior, 
+  predTime = predTime) 
+
+
 nfsFits <- MIfitHMM(argos_45_crwOut, nSims = 1, fit = F)
 nfsFits <- MIfitHMM(argos_45_crwOut, nSims = 1, nbStates = 2, dist = dist, Par0 = Par0)
 plot(nfsFits)
+set.seed(1)
+
+track_T172066 <- tracks_argos %>% 
+  filter(ID == "T172066")
+argos_45_crwOut_foo1 <- track_T172066 %>% 
+  filter(loc_class %in% c("3","2", "0", "A")) %>% 
+           crawlWrap(timeStep = "45 min",
+  retryFits = 1, Time.name = "time",
+  err.model = err.model,
+  prior = prior, 
+  predTime = predTime$T172066[which(track_T172066$loc_class %in% c("3","2", "0", "A"))]) 
+
+nfsFits <- MIfitHMM(argos_45_crwOut_foo1, nSims = 1, fit = F)
+
+
+
+gps_45_crwOut <- crawlWrap(tracks_gps,
+  timeStep = "45 min", Time.name = "time",
+  predTime = predTime)
+gpsFits <- MIfitHMM(gps_45_crwOut, nSims = 1, fit = F)
 ```
 
 ## Integrating dive data
