@@ -52,7 +52,7 @@ Please also set working directory to "Day2" of the HMM workshop:
 setwd("Day2")
 ```
 
-# Import data
+# Import data and initial data processing
 
 <!-- MAM: If you onlye use the August data throughout, create a file that has just the August data.  -->
 <!-- MAM: also here explain the different data manipulation steps (e.g., NA, location class).  -->
@@ -75,32 +75,60 @@ tracks <- read.csv("data/tracks.csv") %>%
 
 The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables
 
-```{r calc dt}
-# calculate time difference between locations
+<!-- MAM: this code chunk was called calc dt. I've changed to calc_dt. Spaces in names are not good in coding, you want to avoid them. I'm going to change throughout. -->
+
+```{r calc_dt}
+# Calculate time difference between locations
 tracks <- tracks %>%
   mutate(dt = ifelse(ID == lead(ID), # If next data row is same individual
     difftime(lead(time), time, units = "mins"), NA
   )) # calculate time difference
-
+# Look at the frequency of time differences
 hist(tracks$dt, 1000, main = NA, xlab = "Time difference (min)")
 ```
 
 Next, we'll convert the data to a spatial dataset using the `sf` package and plot the data.
 First, we define the coordinate reference system of the original data (in this case WGS84, which is defined by the EPSG code `4326`). Next, we will project the data into NAD83(CSRS) UTM zone 21N (EPSG:2962), which will projected the coordinates in meter units with minimal distortion for this data set. 
 
-```{r define projection, message=FALSE}
+<!-- MAM: I would recommend using a different object name (tracks_projected). This is a pretty big transformation, and it helps to be able to go back and run stuff on the original object. -->
+
+```{r define_projection, message=FALSE}
 tracks <- tracks %>%
   st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
   st_set_crs(4326) %>% # define CRS
   st_transform(2962) # reproject data to a UTM
 ```
 
-Now, we can map the data using the `tmap` package to visualise what it looks like.
+<!-- MAM: I would start here with GPS, and leaving error, and time stamps problems to the Argos part.
+I not that I'm not sure whether the time stamp issue may cause problems with the GPS data.-->
+
+```{r filter_gps_data, message=FALSE}
+# filter GPS locations only
+tracks_gps <- tracks %>% 
+  filter(loc_class=="GPS")
+```
+
+We lose some data, particularly near the end of the tracks, but we will integrate ARGOS locations later in this tutorial.
+
+Now, we can map the data using the `tmap` package to visualize what it looks like.
+
+```{r plot_gps_data, message=FALSE}
+# plot GPS
+tracks_gps %>% 
+  group_by(ID) %>% 
+  summarise(do_union = F) %>% 
+  st_cast("LINESTRING") %>% 
+     tm_shape() +
+   tm_lines(col = "ID", palette = "Dark2")
+```
+
+Visualize original data that includes Argos location.
+
 ```{r plot original data, message=FALSE}
 # convert to lines and plot using tmap
 tracks %>% 
   group_by(ID) %>% 
-  summarise(do_union = F) %>% 
+  summarise(do_union = FALSE) %>% 
   st_cast("LINESTRING") %>% 
   tm_shape() + 
   tm_sf(col = "ID", palette = "Dark2")
@@ -108,15 +136,17 @@ tracks %>%
 
 It looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`.
 
-```{r offset duplicate times, message=FALSE}
-# first, we count the run length of each time step using rle
+<!-- MAM: why 10 sec? Is there are reason not to go to one sec? -->
+
+```{r offset_duplicate_times, message=FALSE}
+# 1) count the run length of each time step using rle
 run_length <- rle(tracks$dt)$lengths
-# second, we create a sequence of 1:run_length for each time step
+# 2) create a sequence of 1:run_length for each time step
 run_seqence <- sequence(run_length)
-# third, we discount each time step that's not a duplicate by multiplying by 0
+# 3) discount each time step that's not a duplicate by multiplying by 0
 run_seqence <- run_seqence*(tracks$dt==0)
-# last, we lag run_sequence by one row and replace the first value by 0,
-# so that we itterate each time that is a duplicate of the previous row
+# 4) lag run_sequence by one row and replace the first value by 0,
+# so that we iterate each time that is a duplicate of the previous row
 tracks$duplicate_count <- replace_na(lag(run_seqence), 0)
 # offset duplicate times by 10s
 tracks <- 
@@ -128,12 +158,14 @@ tracks <-
   ))
 
 # last we ensure there are no identical times
-sum(tracks$time == lead(tracks$time), na.rm = T)
+sum(tracks$time == lead(tracks$time), na.rm = TRUE)
 ```
+
+<!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? -->
 
 Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location.
 
-```{r speed filter, message=FALSE}
+```{r speed_filter, message=FALSE}
 # distance from previous location 
 delta_dist <- st_distance(tracks, lag(tracks), by_element=TRUE)
 # time from previous location
@@ -152,26 +184,14 @@ tracks %>% group_by(ID) %>%
      tm_shape()+
    tm_lines(col = "ID", palette = "Dark2")
 ```
+
 Already looking much better.
 
 For the first part of this tutorial, we'll use only the fastloc GPS data so we don't have to deal with location error. 
 
-```{r filter and plot gps data, message=FALSE}
-# filter GPS locations only
-tracks_gps <- tracks %>% 
-  filter(loc_class=="GPS")
 
-# plot GPS
-tracks_gps %>% 
-  group_by(ID) %>% 
-  summarise(do_union = F) %>% 
-  st_cast("LINESTRING") %>% 
-     tm_shape() +
-   tm_lines(col = "ID", palette = "Dark2")
-```
-We lose some data, particularly near the end of the tracks, but we will integrate ARGOS locations later in this tutorial.
 
-## selecting a time interval for the HMH
+## selecting a time interval for the HMM
 there are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g. seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min. 
 
 Let's see what resolutions may be possible in the data by looking at the most frequent time gaps.
