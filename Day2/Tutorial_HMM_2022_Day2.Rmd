@@ -122,70 +122,6 @@ tracks_gps %>%
    tm_lines(col = "ID", palette = "Dark2")
 ```
 
-Visualize original data that includes Argos location.
-
-```{r plot original data, message=FALSE}
-# convert to lines and plot using tmap
-tracks %>% 
-  group_by(ID) %>% 
-  summarise(do_union = FALSE) %>% 
-  st_cast("LINESTRING") %>% 
-  tm_shape() + 
-  tm_sf(col = "ID", palette = "Dark2")
-```
-
-It looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`.
-
-<!-- MAM: why 10 sec? Is there are reason not to go to one sec? -->
-
-```{r offset_duplicate_times, message=FALSE}
-# 1) count the run length of each time step using rle
-run_length <- rle(tracks$dt)$lengths
-# 2) create a sequence of 1:run_length for each time step
-run_seqence <- sequence(run_length)
-# 3) discount each time step that's not a duplicate by multiplying by 0
-run_seqence <- run_seqence*(tracks$dt==0)
-# 4) lag run_sequence by one row and replace the first value by 0,
-# so that we iterate each time that is a duplicate of the previous row
-tracks$duplicate_count <- replace_na(lag(run_seqence), 0)
-# offset duplicate times by 10s
-tracks <- 
-  tracks %>%
-  mutate(time = time + 10*duplicate_count,
-         # recalculate time difference
-         dt = ifelse(ID == lead(ID), 
-    difftime(lead(time), time, units = "mins"), NA
-  ))
-
-# last we ensure there are no identical times
-sum(tracks$time == lead(tracks$time), na.rm = TRUE)
-```
-
-<!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? -->
-
-Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location.
-
-```{r speed_filter, message=FALSE}
-# distance from previous location 
-delta_dist <- st_distance(tracks, lag(tracks), by_element=TRUE)
-# time from previous location
-delta_t <- set_units(lag(tracks$dt), "min") 
-# calculate speed
-tracks$spd <- delta_dist/delta_t
-
-# filter speed
-tracks <- tracks %>% 
-  filter(spd < set_units(10, "m/s"))
-
-# convert to lines and plot
-tracks %>% group_by(ID) %>% 
-  summarise(do_union = F) %>% 
-  st_cast("LINESTRING") %>% 
-     tm_shape()+
-   tm_lines(col = "ID", palette = "Dark2")
-```
-
-Already looking much better.
 
 For the first part of this tutorial, we'll use only the fastloc GPS data so we don't have to deal with location error. 
 
@@ -441,6 +377,73 @@ new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%
 
 ## Dealing with location error and irregular time
 Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series. 
+
+<!-- MAM: I moved this from above. But didn't quite check if it' integrated well yet -->
+Visualize original data that includes Argos location.
+
+```{r plot original data, message=FALSE}
+# convert to lines and plot using tmap
+tracks %>% 
+  group_by(ID) %>% 
+  summarise(do_union = FALSE) %>% 
+  st_cast("LINESTRING") %>% 
+  tm_shape() + 
+  tm_sf(col = "ID", palette = "Dark2")
+```
+
+It looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`.
+
+<!-- MAM: why 10 sec? Is there are reason not to go to one sec? -->
+
+```{r offset_duplicate_times, message=FALSE}
+# 1) count the run length of each time step using rle
+run_length <- rle(tracks$dt)$lengths
+# 2) create a sequence of 1:run_length for each time step
+run_seqence <- sequence(run_length)
+# 3) discount each time step that's not a duplicate by multiplying by 0
+run_seqence <- run_seqence*(tracks$dt==0)
+# 4) lag run_sequence by one row and replace the first value by 0,
+# so that we iterate each time that is a duplicate of the previous row
+tracks$duplicate_count <- replace_na(lag(run_seqence), 0)
+# offset duplicate times by 10s
+tracks <- 
+  tracks %>%
+  mutate(time = time + 10*duplicate_count,
+         # recalculate time difference
+         dt = ifelse(ID == lead(ID), 
+    difftime(lead(time), time, units = "mins"), NA
+  ))
+
+# last we ensure there are no identical times
+sum(tracks$time == lead(tracks$time), na.rm = TRUE)
+```
+
+<!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? -->
+
+Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location.
+
+```{r speed_filter, message=FALSE}
+# distance from previous location 
+delta_dist <- st_distance(tracks, lag(tracks), by_element=TRUE)
+# time from previous location
+delta_t <- set_units(lag(tracks$dt), "min") 
+# calculate speed
+tracks$spd <- delta_dist/delta_t
+
+# filter speed
+tracks <- tracks %>% 
+  filter(spd < set_units(10, "m/s"))
+
+# convert to lines and plot
+tracks %>% group_by(ID) %>% 
+  summarise(do_union = F) %>% 
+  st_cast("LINESTRING") %>% 
+     tm_shape()+
+   tm_lines(col = "ID", palette = "Dark2")
+```
+
+Already looking much better.
+
 
 location accuracy (ignoring duplicate locations)
 ```{r}
