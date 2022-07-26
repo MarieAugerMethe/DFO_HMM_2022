@@ -1,8 +1,8 @@
 ---
 title: "Installing packages"
 subtitle: "Tips to install some of the packages"
-author: "Joe Watson & Marie Auger-Méthé"
-date: "12/02/2021"
+author: "Joe Watson, Ron Togunov, & Marie Auger-Méthé"
+date: "26/07/2022"
 output: 
   html_document:
     css: "CSSdefs.css"
@@ -77,68 +77,50 @@ sudo apt-get install libudunits2-dev libgdal-dev libgeos-dev libproj-dev
 
 ### Installing the latest version of the spatial packages
 
-The latest version of rgdal, rgeos, and sp are **required**. The workshop material **will not work without these**. These can be installed **after** the latest GIS software has been installed.
+The latest version of sf and terra are **required**. The workshop material **will not work without these**. These can be installed **after** the latest GIS software has been installed.
 
 ```{r,eval=F}
-install.packages(c('rgdal','rgeos','sp','sf','spdep','maptools','spatstat'), dep=T)
+install.packages(c('sf','terra'), dep=TRUE)
 ```
-
-
-### Packages not available on CRAN
-
-Our methodology highly depends on the INLA package. This **testing** version ($\geq$ 21.01.26) of this package must be installed directly from the [www.r-inla.org](https://www.r-inla.org) website. To do so, you can run the following in R:
-
-```{r eval=FALSE}
-install.packages("INLA", repos=c(getOption("repos"), INLA="https://inla.r-inla-download.org/R/testing"), dep=TRUE)
-```
-
-For more details, see [www.r-inla.org/download-install](https://www.r-inla.org/download-install).
-
-
-### Package that requires a special version
-
-inlabru is available on CRAN, but the version ($\geq$ 2.2.6) we need for this workshop is the new version **only available on GithHub**.
-
-To install packages from GitHub, we will use the package `remotes`.
-
-```{r,eval=F}
-install.packages('remotes')
-```
-
-Next, we will install `inlabru`
-
-```{r eval=FALSE}
-remotes::install_github("inlabru-org/inlabru", ref="stable")
-```
-
-Note, if you have an error of the type *Error: (converted from warning) package X was built under R version #.#.#* that aborts the whole install. Run `Sys.setenv("R_REMOTES_NO_ERRORS_FROM_WARNINGS" = "true")`.
 
 ### Packages available on CRAN
 
-The remaining packages should be updated via CRAN (using install.packages()):
+The remaining packages do not have special dependencies, and should be easily installed or updated via CRAN (using install.packages()):
 
++ momentuHMM
++ dplyr
++ tidyr
 + lubridate
-+ maptools
-+ readxl
-+ ggmap
-+ raster
++ adhabitatLT
++ tmap
++ units
++ stringr
++ diveMove
++ conicfit
++ car
++ mitools
++ doFuture
++ corrPlot
 
 ### Check that all packages are installed
 
 Once all the packages are installed, you can check that they are properly installed by loading them.
 
 ```{r warning=FALSE, message=FALSE, error=FALSE, eval=FALSE}
-library(rgdal)
-library(rgeos)
-library(sp)
 library(sf)
-library(maptools)
-library(spatstat)
-library(spdep)
-library(INLA)
-library(inlabru)
-library(readxl)
+library(terra)
+library(momentuHMM)
+library(dplyr)
+library(tidyr)
 library(lubridate)
-library(ggmap)
-library(raster)
+library(adhabitatLT)
+library(tmap)
+library(units)
+library(stringr)
+library(diveMove)
+library(conicfit)
+library(car)
+library(mitools)
+library(doFuture)
+library(corrPlot)
 ```
