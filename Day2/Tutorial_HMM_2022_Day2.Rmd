@@ -73,9 +73,11 @@ tracks <- read.csv("data/tracks.csv") %>%
 
 ```
 
-The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables
+The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables.
 
 <!-- MAM: this code chunk was called calc dt. I've changed to calc_dt. Spaces in names are not good in coding, you want to avoid them. I'm going to change throughout. -->
+
+<!-- MAM : I would consider moving this down to the section selecting a time interval. It will make more sense there. Note that it will affetc the code down the line if you use dt in the Argos analysis. -->
 
 ```{r calc_dt}
 # Calculate time difference between locations
@@ -100,7 +102,9 @@ tracks <- tracks %>%
 ```
 
 <!-- MAM: I would start here with GPS, and leaving error, and time stamps problems to the Argos part.
-I not that I'm not sure whether the time stamp issue may cause problems with the GPS data.-->
+So I moved this up, and the filtering stuff down. I note that I'm not sure whether the time stamp issue may cause problems with the GPS data.-->
+
+For the first part of this tutorial, we'll use only the fastloc GPS data so we don't have to deal with location error.
 
 ```{r filter_gps_data, message=FALSE}
 # filter GPS locations only
@@ -123,35 +127,49 @@ tracks_gps %>%
 ```
 
 
-For the first part of this tutorial, we'll use only the fastloc GPS data so we don't have to deal with location error. 
+## Selecting a time interval for the HMM
+
+<!-- MAM: this is where I'd think the dt stuff from above would make more sense. Clearly stating that HMM assumes regular time locations, and that marine data is not always at regular time interval is important. -->
+
+There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g. seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min. 
 
 
-
-## selecting a time interval for the HMM
-there are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g. seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min. 
 
 Let's see what resolutions may be possible in the data by looking at the most frequent time gaps.
-```{r calc and view track dt}
+```{r calc_track_dt}
 # identify the most frequent dt
 tracks_gps %>% 
   {table(.$dt)} %>% 
-  sort(decreasing = T) %>% 
+  sort(decreasing = TRUE) %>% 
   head()
-# visualise time differences
+```
+
+
+```{r view_track_dt}
+# Visualize time differences
 hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)")
+# Zoom in on short intervals
 hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)", xlim = c(0,100))
 ```
-We see that that the most frequent time gap is 10 min, followed by 1, 11, and 12 min. We also see the majority of the gaps are < 60 min, however some are in excess of 600 min. Although it may be possible to use 1 or 2 min resolution data, we will have to address the data gaps. Frequent and large data gaps can be difficult to handle, especially as the number of missing data points approaches or exceeds the existing data; we really want to avoid this. Let's examine the potential data structure at different resolutions for the different animals.
-```{r track resolution proportion NA}
-# make function to estimate proportion of missing location 
+
+We see that that the most frequent time gap is 10 min, followed by 11, 1, 9, and 12 min. We also see the majority of the gaps are < 60 min, however some are in excess of 600 min. Although it may be possible to use 1 or 2 min resolution data, we will have to address the data gaps. Frequent and large data gaps can be difficult to handle, especially as the number of missing data points approaches or exceeds the existing data; we really want to avoid this. Let's examine the potential data structure at different resolutions for the different animals.
+
+We first create a function that can calculate the proportion of missing locations we would have for a given resolution.
+
+```{r proportion_NA_fx}
+# Make function to estimate proportion of missing location 
 p_na <- function(t_0, t_max, n_loc, resolution) {
   max_n_loc <- length(seq(t_0, t_max, by = as.difftime(resolution, units = "mins")))
   n_NA <- max_n_loc - n_loc
   n_NA / max_n_loc
 }
+```
 
+We can now use this function look at the proportion of NAs we would get with 1, 2, 5, 10, and 20 min resolution.
+
+```{r track_resolution_proportion_NA}
 # summarise tracks
- track_summary <-
+track_summary <-
     tracks_gps %>% st_drop_geometry() %>% 
   # limit to core period with data
   group_by(ID) %>% 
@@ -166,14 +184,18 @@ track_summary
 ```
 Here we see that despite the large number of 1 min time steps, at that resolution, >95 /% of the potential locations are missing. Even at the 10 min interval, > 50% of the locations would be missing. Very large data gaps that contribute to much of the missing locations can be excluded from the analysis, therefore, for this tutorial, I will use a 10 min resolution as a compromise between high-resolution information and good temporal coverage.
 
+## Handling data gaps
+
 There are several ways to deal with data gaps, and I will address four 
 1. Interpolation (linear or statistical)
 2. Nullification
 3. Path segmentation
 4. Multiple imputation
 
-For large datasets with few and small gaps, the simplest approach to use linear interpolation. First, let's identify thy most likely minute we have data.
-```{r identify most freq dt}
+### Approach 1. Interpolation
+
+For large datasets with few and small gaps, the simplest approach to use linear interpolation. First, let's identify the most likely minute we have data.
+```{r identify_most_freq_dt}
 # which minute has the most data
 tracks_gps %>% 
   st_drop_geometry() %>%  # must convert back to data.frame
@@ -181,9 +203,10 @@ tracks_gps %>%
   summarise(minute = str_sub(minute(time),-1)) %>% 
   table()
 ```
+
 It looks like for all three tracks, the most amount of locations fall on 0 min  (i.e., 10, 20, 30, 40, 50, 60 min). Next, for each track, we will create a vector of times in which to estimate locations.
 
-```{r linear interpolation}
+```{r linear_interpolation_prep}
 # convert tracks back to data.frame with xy coordinates
 tracks_gps_ls <- tracks_gps %>% 
   mutate(x = st_coordinates(tracks_gps)[,"X"],  
@@ -203,7 +226,9 @@ tracks_gps_ls_time <- tracks_gps %>%
 
 Now, we can interpolate the locations for each track.
 
-```{r linear interpolation}
+<!-- MAM: you can't have two code chunk with the same name. You won't be able to compile it. So change name above. -->
+
+```{r linear_interpolation}
 # function to create a data frame with approximated locations
 approx_locs <- function(tracks, times){
   data.frame(ID = times$ID,
@@ -226,16 +251,17 @@ rownames(tracks_gps_linear) <- NULL
 plot(tracks_gps_linear$x, tracks_gps_linear$y, pch = 20, col = "red", xlab = "x", ylab = "y", asp = 1)
 points(st_coordinates(tracks_gps)[,"X"], st_coordinates(tracks_gps)[,"Y"], pch = 20)
 ```
-Looks like it works. Let's try fitting an HMM to this. First, lets preparte the data using `prepData` and plot the data to estimate starting parameters.
 
-```{r linear HMM prep}
+Looks like it works. Let's try fitting an HMM to this. First, lets prepare the data using `prepData` and plot the data to estimate starting parameters.
+
+```{r linear_HMM_prep}
 prep_gps_linear <- prepData(tracks_gps_linear, type = "UTM")
 
 plot(prep_gps_linear, ask = F)
 ```
 
 
-```{r linear HMM starting pars}
+```{r linear_HMM_starting_pars}
 # Setting up the starting values
 mu0 <- c(50, 500) # Mean step length
 sigma0 <- c(50, 500) # Sd of the step length
@@ -244,20 +270,20 @@ kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
 
 Ok, were are ready. Let's fit the HMM
 
-```{r linear HMM fitHMM, message=FALSE}
+```{r linear_HMM_fitHMM, message=FALSE}
 set.seed(1)
 # Fit a 2 state HMM
 HMM_gps_linear <- fitHMM(prep_gps_linear, nbState = 2, dist = list(step = "gamma",
 angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0), formula = ~ 1)
 
-plot(HMM_gps_linear, ask = F)
+plot(HMM_gps_linear, ask = FALSE)
 ```
 
 That model does not look good. It's clear from the mapped states that state 1 largely represents the original data, while state 2 primarily represents the interpolated data. This is a common problem when data gaps are frequent or large such that the information in the interpolated data outweighs the signal from the original observations. Generally, I would only use linear interpolation when data gaps are small (< 3 locations) or relatively infrequent (< 20 \% of the modelled locations). In our data, some gaps are > 5 hours (30 locations) and > 50\% of the modelled locations are interpolated. So we need to use another approach.
 
 A slightly better way to interpolate locations is to fit a correlated random walk (CRW) model to the data and predict the most likely locations. `momentuHMM` contains wrapper functions to interpolate missing locations by fitting continuous-time CRW to the data based on the `crawl` package by Devin Johnson and Josh London. There are many options to fit the `crawl` model, and a detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>. Let's try to fit the most basic model using the wrapper function `crawlWrap`.
 
-```{r crawl 10 min gps}
+```{r crawl_10_min_gps}
 set.seed(1) # crawl often fails, so I recommend always setting a seed 
 # fit crawl
 crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
@@ -266,7 +292,7 @@ plot(crw_gps_10, ask = F)
 ```
 Notice how the predicted tracks do not make perfectly straight lines through missing sections (particularly noticeable in T172062). Next, we will extract the predicted locations and add them to the observed data.
 
-```{r crawl predict 10 min}
+```{r crawl_predict_10_min}
 # filter predicted locations
 tracks_gps_crw <- data.frame(crw_gps_10$crwPredict) %>% 
   filter(locType == "p") %>% 
@@ -277,7 +303,7 @@ tracks_gps_crw <- data.frame(crw_gps_10$crwPredict) %>%
 
 Now, let's try to fit the same HMM as before on this data using the same starting parameters.
 
-```{r crawl HMM fitHMM, message = FALSE}
+```{r crawl_HMM_fitHMM, message=FALSE}
 set.seed(1)
 # prep data 
 prep_gps_crw <- prepData(tracks_gps_crw, type = "UTM")
@@ -293,10 +319,12 @@ HMM_gps_crw <- fitHMM(prep_gps_crw, nbState = 2, dist = list(step = "gamma",
 
 plot(HMM_gps_crw, ask = F)
 ```
+
 That's looking much better. It looks like state 1 represents a low-speed, high tortuosity resident state, while state 2 reperesents higher-speed, low tortuosity travelling state. In many instances, this model may be sufficient. However, because we do have such a large amount of interpolated locations, they represent a significant amount of the fitted data and may skew the representation of the states. For example, the large interpolated gaps are still relatively straightened out and a very consistent speed, and may skew the definition of state 2 in particular. There are different ways to deal with this, one of which is to simply keep it in mind when interpreting the results and subsequent analyses. However, here I propose one strategy by nullifying the data streams (i.e., step length and turning angle) during moderate/large interpolated gaps where we expect that the estimated movement has is largely independent of the observed data before or after the gap. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. In this case, I will nullify predicted locations in gaps larger than 60 min. First, we will identify which steps need to be nullified, then we will prepare the data and nullify the estimated `step` and `angle` datastreams. We will do this again later in the tutorial, so we will wrap it into a function called `prepData_NAGaps`.
 
+### Approach 2. Nullify data gaps
 
-```{r id nullify gaps}
+```{r id_nullify_gaps}
 # define function to replace step and turn angle of large gaps with NA
 NA_gaps <- function(tracks, times){
   # rows where location is within a large gap
@@ -378,7 +406,7 @@ new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%
 ## Dealing with location error and irregular time
 Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series. 
 
-<!-- MAM: I moved this from above. But didn't quite check if it' integrated well yet -->
+<!-- MAM: I moved this from above. But didn't quite check if it' integrated well yet. -->
 Visualize original data that includes Argos location.
 
 ```{r plot original data, message=FALSE}
