@@ -80,7 +80,7 @@ sudo apt-get install libudunits2-dev libgdal-dev libgeos-dev libproj-dev
 The latest version of sf and terra are **required**. The workshop material **will not work without these**. These can be installed **after** the latest GIS software has been installed.
 
 ```{r,eval=F}
-install.packages(c('sf','terra'), dep=TRUE)
+install.packages(c('sf', 'terra', 'tmap'), dep=TRUE)
 ```
 
 ### Packages available on CRAN
@@ -109,12 +109,12 @@ Once all the packages are installed, you can check that they are properly instal
 ```{r warning=FALSE, message=FALSE, error=FALSE, eval=FALSE}
 library(sf)
 library(terra)
+library(tmap)
 library(momentuHMM)
 library(dplyr)
 library(tidyr)
 library(lubridate)
 library(adhabitatLT)
-library(tmap)
 library(units)
 library(stringr)
 library(diveMove)
