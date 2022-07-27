@@ -44,17 +44,17 @@ library(doFuture)
 library(corrplot)  # Pearson's correlation matrix using cor()
 ```
 
-<!-- MAM: to be able to compile you need to put all the code in the chunks -->
+<!-- MAM: to be able to run the code in the .Rmd  you need to put all the code in the chunks. For it to work here when compiling, we need to have eval=FALSE (since the default wd for compiling is the directory with .Rmd file.)  -->
 
 Please also set working directory to "Day2" of the HMM workshop:
 
-```{r, message=FALSE}
+```{r, eval=FALSE, message=FALSE}
 setwd("Day2")
 ```
 
 # Import data and initial data processing
 
-<!-- MAM: If you onlye use the August data throughout, create a file that has just the August data.  -->
+<!-- MAM: If you only use the August data throughout, create a file that has just the August data.  -->
 <!-- MAM: also here explain the different data manipulation steps (e.g., NA, location class).  -->
 <!-- That's actually quite important in this tutorial about messy data. -->
 
@@ -120,7 +120,7 @@ Now, we can map the data using the `tmap` package to visualize what it looks lik
 # plot GPS
 tracks_gps %>% 
   group_by(ID) %>% 
-  summarise(do_union = F) %>% 
+  summarise(do_union = FALSE) %>% 
   st_cast("LINESTRING") %>% 
      tm_shape() +
    tm_lines(col = "ID", palette = "Dark2")
@@ -131,9 +131,7 @@ tracks_gps %>%
 
 <!-- MAM: this is where I'd think the dt stuff from above would make more sense. Clearly stating that HMM assumes regular time locations, and that marine data is not always at regular time interval is important. -->
 
-There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g. seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min. 
-
-
+There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g. seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min.
 
 Let's see what resolutions may be possible in the data by looking at the most frequent time gaps.
 ```{r calc_track_dt}
@@ -182,15 +180,16 @@ track_summary <-
               p_NA_20m =p_na(first(time), last(time), n_loc, 20))  # 20 min 
 track_summary
 ```
+
 Here we see that despite the large number of 1 min time steps, at that resolution, >95 /% of the potential locations are missing. Even at the 10 min interval, > 50% of the locations would be missing. Very large data gaps that contribute to much of the missing locations can be excluded from the analysis, therefore, for this tutorial, I will use a 10 min resolution as a compromise between high-resolution information and good temporal coverage.
 
 ## Handling data gaps
 
 There are several ways to deal with data gaps, and I will address four 
 1. Interpolation (linear or statistical)
-2. Nullification
+2. Nullification <!-- MAM: I find this term weird. -->
 3. Path segmentation
-4. Multiple imputation
+4. Multiple imputation <!-- MAM: is approach 4 only relevant when we have Argos data? If yes, then drop it from here, and deal with in in Argos data -->
 
 ### Approach 1. Interpolation
 
@@ -320,9 +319,16 @@ HMM_gps_crw <- fitHMM(prep_gps_crw, nbState = 2, dist = list(step = "gamma",
 plot(HMM_gps_crw, ask = F)
 ```
 
-That's looking much better. It looks like state 1 represents a low-speed, high tortuosity resident state, while state 2 reperesents higher-speed, low tortuosity travelling state. In many instances, this model may be sufficient. However, because we do have such a large amount of interpolated locations, they represent a significant amount of the fitted data and may skew the representation of the states. For example, the large interpolated gaps are still relatively straightened out and a very consistent speed, and may skew the definition of state 2 in particular. There are different ways to deal with this, one of which is to simply keep it in mind when interpreting the results and subsequent analyses. However, here I propose one strategy by nullifying the data streams (i.e., step length and turning angle) during moderate/large interpolated gaps where we expect that the estimated movement has is largely independent of the observed data before or after the gap. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. In this case, I will nullify predicted locations in gaps larger than 60 min. First, we will identify which steps need to be nullified, then we will prepare the data and nullify the estimated `step` and `angle` datastreams. We will do this again later in the tutorial, so we will wrap it into a function called `prepData_NAGaps`.
+That's looking much better. It looks like state 1 represents a low-speed, high tortuosity resident state, while state 2 represents higher-speed, low tortuosity travelling state. 
+
+In many instances, this model may be sufficient. However, the significant proportion of interpolated locations used to fit the model is likely to affect our results. For example, the large interpolated gaps are still relatively straightened out and a very consistent speed, and may skew the definition of state 2 in particular. Simply interpreting the results with this issue in mind can be adequate when we only have few interpolated locations. Below, we will explore more formal ways to address this problem, which can be particularly useful when we have very large numbers of interpolated locations.
 
 ### Approach 2. Nullify data gaps
+
+<!-- MAM: is the term nullify something you saw somewhere? I'm not sure it's very intuitive. -->
+
+One strategy to address large data gaps is to nullify the data streams (i.e., step length and turning angle) during moderate/large interpolated gaps where we expect that the estimated movement has is largely independent of the observed data before or after the gap. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. In this case, I will nullify predicted locations in gaps larger than 60 min. First, we will identify which steps need to be nullified, then we will prepare the data and nullify the estimated `step` and `angle` data streams. We will do this again later in the tutorial, so we will wrap it into a function called `prepData_NAGaps`.
+
 
 ```{r id_nullify_gaps}
 # define function to replace step and turn angle of large gaps with NA
@@ -381,19 +387,23 @@ kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
 # Fit a 2 state HMM
 HMM_gps_crw_NAgaps <- fitHMM(prep_tracks_gps_crw_NAgaps, nbState = 2, dist = list(step = "gamma", angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0))
 
-plot(HMM_gps_crw_NAgaps, ask = F)
+plot(HMM_gps_crw_NAgaps, ask = FALSE)
 ```
+
 Visually, the difference is subtle.
 
 ```{r}
 HMM_gps_crw$mle[c("step", "angle")]
 HMM_gps_crw_NAgaps$mle[c("step", "angle")]
 ```
-The estimated parameters are quite different whether you account for the large gaps in data. When you nullify large gaps, the mean step length for both states is higher, and the turn angle concentration parameters is lower for both states (i.e., more tortuous). The fact that the parameters change for both states, suggests that the large gaps skewed the parameterisation of both states.
 
-Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the the ID column. We will not implement this approach in this tutorial, however, it can be done using the following code:
+However, the estimated parameters are quite different whether you account for the large gaps in data. When you nullify large gaps, the mean step length for both states is higher, and the turn angle concentration parameters is lower for both states (i.e., more tortuous). The fact that the parameters change for both states, suggests that the large gaps skewed the parameterisation of both states.
 
-```{r track segmentation}
+### Approach 3. Path segmentation
+
+Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect the subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the ID column. We will not implement this approach in this tutorial, however, it can be done using the following code:
+
+```{r track_segmentation}
 gap_thresh <- 3*60 # in hours (3h for illustration)
 # gaps no more than 6h per segment
 new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%  # if dif.time > gap_thresh or new ID
@@ -409,7 +419,7 @@ Thus far, we have been using exclusively the GPS data, which can be assumed to h
 <!-- MAM: I moved this from above. But didn't quite check if it' integrated well yet. -->
 Visualize original data that includes Argos location.
 
-```{r plot original data, message=FALSE}
+```{r plot_original_data, message=FALSE}
 # convert to lines and plot using tmap
 tracks %>% 
   group_by(ID) %>% 
@@ -446,7 +456,7 @@ tracks <-
 sum(tracks$time == lead(tracks$time), na.rm = TRUE)
 ```
 
-<!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? -->
+<!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? You might want to explain why. -->
 
 Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location.
 
@@ -483,9 +493,11 @@ tracks %>%
 
 we have to deal with location error, irregular time, and missing locations. The `crawl` model that we fit earlier can be extended to predict tracks from irregular data with location error. In this section, we will cover using `crawlWrap` to amputate regular locations when faced with more difficult data (e.g., ARGOS) and fitting an HMM to multiple imputed data.
 
+<!-- MAM: here you have to put a bit more info on crawl. I.e. it's a state space models that handle error, etc. -->
+
 First let's identify a resolution to work at if only obtained ARGOS data.
 
-```{r select ARGOS resolution}
+```{r select_ARGOS_resolution}
 # filter argos data
 tracks_argos <- filter(tracks, loc_class != "GPS") %>% 
   # calculate dime difference
@@ -503,10 +515,12 @@ tracks_argos_ls <- tracks_argos %>%
 hist(tracks_argos$dt[tracks_argos$dt<180], 32, 
      main = NA, xlab = "Time difference (min)")
 ```
+
 In this section, we will use 45 min as a trade-off between higher resolution and minimising data gaps.
 
 Next, we will define model structure for `crawl`. The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)).
-```{r fit 45 min crawl to argos and gps tracks,  message=FALSE}
+
+```{r fit_45_min_crawl_to_argos_and_gps_tracks,  message=FALSE}
 # define priors
 prior <- function(p) {
   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
@@ -534,7 +548,7 @@ argos_45_crwOut <- crawlWrap(tracks_argos,
   err.model = err.model,
   prior = prior, 
   predTime = predTime) 
-plot(crw_argos_45, ask = F)
+plot(crw_argos_45, ask = FALSE)
 # convert to data.frame and extract predicted locations
 crw_argos_45 <- data.frame(argos_45_crwOut$crwPredict) %>% 
   filter(locType == "p") %>% 
@@ -558,10 +572,13 @@ plot(y~x, data=., type = 'l', col = 'red', asp=1)
 filter(crw_gps_45, ID=="T172062") %>% 
 points(y~x, data=., type = 'l')
 ```
+
+<!-- MAM: I get some pretty daming error message here. -->
+
 We see that there is pretty good over lap between the ARGOS (red) and GPS (black) tracks at a 45 min resolution. However, there are some sections where the ARGOS track cuts straight lines through sections where there is variability in the GPS track.
 
 Let's try to fit an HMM to the interpolated ARGOS tracks.
-```{r prep ARGOS tracks and fit basic HMM, message = FALSE}
+```{r prep_ARGOS_tracks_and_fit_basic_HMM, message = FALSE}
 set.seed(1)
 # prep tracks
 prep_argos_45 <- prepData(crw_argos_45, type = "UTM")
@@ -584,17 +601,20 @@ plot(HMM_gps_45_basic, animals = "T172062", ask = F)
 # compare predicted states
 sum(viterbi(HMM_argos_45_basic) == viterbi(HMM_gps_45_basic))/nrow(prep_argos_45)
 ```
+
 The interpolated GPS track seems to fit, however the model had some issues fitting the ARGOS data. Further, $<50/%$ of the predicted states from the ARGOS model are the same as the GPS model. I suspect the issue may be due to the large gaps where the interpolated track is basically linear. Indeed, in the GPS HMM, state 1 seems to primarily be classifying the straight interpolated sections as state 1 and the rest as state 2. We can try to address this by nullify gaps using the `prepData_NAGaps` function we defined earlier. In this case, we will nullify gaps $>180$ min
-```{r prep data and nullify gaps}
+
+```{r prep_data_and_nullify_gaps}
 # prep 45 min ARGOS data with nullified gaps
 prep_argos_45 <- prepData_NAGaps(track_list = tracks_argos_ls, tracks_crw = crw_argos_45, res = 45, max_gap = 180, type = "UTM")
 
 # prep 45 min gps data with nullified gaps
 prep_gps_45 <- prepData_NAGaps(track_list = tracks_gps_ls, tracks_crw = crw_gps_45, res = 45, max_gap = 180, type = "UTM")
 ```
+
 Now, let's try to fit the same HMM as above to this data with large gaps nullified. 
 
-```{r nullified crawl HMM fitHMM, message = FALSE}
+```{r nullified_crawl_HMM_fitHMM_argos, message=FALSE}
 set.seed(1)
 # Fit a 2 state HMM for 45 min ARGOS and GPS tracks
 HMM_argos_45 <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0)
@@ -607,10 +627,12 @@ sum(viterbi(HMM_gps_45_basic) == viterbi(HMM_gps_45))/nrow(prep_argos_45)
 # compare new and original GPS model predicted states
 sum(viterbi(HMM_argos_45) == viterbi(HMM_gps_45))/nrow(prep_argos_45)
 ```
+
 Both data sets seem to fit easily. There isn't a large change between this GPS model and the previous one (without nullifying large gaps); $91/%$ of the predicted states are the same. However, the overlap between the ARGOS and GPS models is much higher than previously ($71\%$), suggesting the ARGOS model with nullified gaps is significantly improved. However, there is still a notable discrepancy between the ARGOS and the GPS HMMs.
 
 ### Multiple imputation
-```{r fit multiple imputations}
+
+```{r fit_multiple_imputations}
 
 # define priors
 prior <- function(p) {
@@ -661,7 +683,7 @@ gpsFits <- MIfitHMM(gps_45_crwOut, nSims = 1, fit = F)
 
 ## Integrating dive data
 
-```{r import depth data, warning=FALSE}
+```{r import_depth_data, warning=FALSE}
 dives <- read.csv("data/dives.csv") %>% 
   mutate(time = ymd_hms(time)) %>% 
   filter(month(time) == 8, day(time) > 7,  day(time) <= 14)
@@ -697,7 +719,7 @@ plotTDR(dive_TDR[[1]]) # note: try zooming in to part of the dive
 
 Next, we must use the `calibrateDepth` to calibrate the depth data. This function identifies wet and dry periods (for animals that haul out), applies a zero-offset correction (ZOC), and identifies all dives in the record and their phases. ZOC can be done using either the `offset` or `filter` method. In this case, we will assume the depth data is accurate and does not require an offset. We should also specify `dive.thr`, which represents the threshold depth below which an underwater phase should be considered a dive -- in this case, we will set it at 8 m. There are many other optional parameters to identify dives that we will not get into in this tutorial (See `vignette("diveMove")` for details). 
 
-```{r calibrate TDR, warning=FALSE}
+```{r calibrate_TDR, warning=FALSE}
 # calibrate TDR and identify dive phases
 dive_TDR_calib <- lapply(X = dive_TDR, FUN = calibrateDepth, zoc.method = "offset", offset = 0, dive.thr = 8)
 
@@ -847,7 +869,7 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
 `step` and `angle` seem quit independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, se we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`. 
 
 To get starting parameters, we can fit an HMM to each one independently. We will use the gamma distribution for both and for now will use the same starting parameters.
-```{r prep dive data and independent HMMs, message=FALSE}
+```{r prep_dive_data_and_independent_HMMs, message=FALSE}
 # identify whether there is 0 data
 tracks_dives %>% 
   summarise(max_dep = sum(max_dep == 0, na.rm = T), 
@@ -1172,7 +1194,7 @@ autoplot(pca_res)
 
 
 
-```{r calibrate TDR, warning=FALSE}
+```{r calibrate_TDR_extra, warning=FALSE}
 i = 0
 plot(dives$depth*-1, pch = 19, type = 'l', xlim = c(1,8)+8*i, ylim = c(-100,0)); i = i+1
 i = 0
