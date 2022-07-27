@@ -455,7 +455,9 @@ plotTDR(dive_TDR[[1]]) # note: try zooming in to part of the dive
 
 Next, we must use the `calibrateDepth` to calibrate the depth data. This function identifies wet and dry periods (for animals that haul out), applies a zero-offset correction (ZOC), and identifies all dives in the record and their phases. ZOC can be done using either the `offset` or `filter` method. In this case, we will assume the depth data is accurate and does not require an offset. We should also specify `dive.thr`, which represents the threshold depth below which an underwater phase should be considered a dive -- in this case, we will set it at 8 m. There are many other optional parameters to identify dives that we will not get into in this tutorial (See `vignette("diveMove")` for details). 
 
-```{r calibrate_TDR, warning=FALSE}
+<!-- MAM: add cache=TRUE to make the kniting faster. Note that sometimes you need to remove the files created, if you run into problems. -->
+
+```{r calibrate_TDR, warning=FALSE, cache=TRUE}
 # calibrate TDR and identify dive phases
 dive_TDR_calib <- lapply(X = dive_TDR, FUN = calibrateDepth, zoc.method = "offset", offset = 0, dive.thr = 8)
 
@@ -546,6 +548,8 @@ Any of the eight variables can be used as data streams in the HMM, however, incl
 Assuming all the variables are biologically relevant, let's look at structure in the data.
 I will also add a subjective score based on the results (first number after `#` symbol).
 
+<!-- MAM: break down this chunk and add explanations for each bits -->
+
 ```{r data_structure}
 vars <- c("mean_dep","max_dep","dive_t","bott_t","prop_bott",
           "max_dive_dep","bott_dist","post_dive_dur")
@@ -593,18 +597,19 @@ data.frame(var = c("mean_dep", "max_dep", "dive_t", "bott_t", "prop_bott",
                      1, 4, 4, 1))
 
 ```
+
 From my subjective interpretation of these outputs, I think the five most promising variables to include are maximum depth, dive time, mean depth, maximum dive depth, and bottom distribution. Next, let's merge the dive data streams the location data.
 
-```{r merge track & dive data.}
+```{r merge_track_and_dive_data}
 tracks_dives <- left_join(prep_tracks_gps_crw_NAgaps, 
                           dives_sum[,c("ID", "time", "max_dep", "dive_t", 
                                        "mean_dep", "max_dive_dep", "bott_dist")], 
                           by = c("ID", "time"))
 ```
 
-Now, we must check for co-linearity between the data streams to select 1--3 to use in the HMM. We can check co-linearity using the Paerson's correlation matrix.
+Now, we must check for co-linearity between the data streams to select 1--3 to use in the HMM. We can check co-linearity using the Pearson's correlation matrix.
 
-```{r dive co-linearity}
+```{r dive_co_linearity}
 # calculate and plot check Paerson's correlation matrix
 tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", 
              "bott_dist", "step", "angle")] %>% 
@@ -612,9 +617,13 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
   cor() %>% 
   corrplot(method="number")
 ```
+
 `step` and `angle` seem quit independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, se we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`. 
 
+<!-- MAM: HMM assumes that the response variables are conditionally independent base on the state. You may want to mention that. Some of that correlation could be explained by the state, -->
+
 To get starting parameters, we can fit an HMM to each one independently. We will use the gamma distribution for both and for now will use the same starting parameters.
+
 ```{r prep_dive_data_and_independent_HMMs, message=FALSE}
 # identify whether there is 0 data
 tracks_dives %>% 
