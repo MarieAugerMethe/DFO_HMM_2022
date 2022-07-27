@@ -287,8 +287,9 @@ set.seed(1) # crawl often fails, so I recommend always setting a seed
 # fit crawl
 crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
 # plot fit tracks
-plot(crw_gps_10, ask = F)
+plot(crw_gps_10, ask = FALSE)
 ```
+
 Notice how the predicted tracks do not make perfectly straight lines through missing sections (particularly noticeable in T172062). Next, we will extract the predicted locations and add them to the observed data.
 
 ```{r crawl_predict_10_min}
