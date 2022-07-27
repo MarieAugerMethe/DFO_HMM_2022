@@ -13,7 +13,7 @@ output:
 
 ## Objectives
 
-Our main objectives are to handle some of the common data problems encountered with marine movement and diving data, using a narwhal dataset provided by Dr. Marianne Marcoux. Specifically, we aim to address the following:
+Our main objectives are to handle some of the common data problems encountered with marine fastloc GPS data and diving data, using a narwhal dataset provided by Dr. Marianne Marcoux. Specifically, we aim to address the following:
 
 -   Irregular locations
 
@@ -190,7 +190,6 @@ There are several ways to deal with data gaps, and I will address four
 1. Interpolation (linear or statistical)
 2. Nullification <!-- MAM: I find this term weird. -->
 3. Path segmentation
-4. Multiple imputation <!-- MAM: is approach 4 only relevant when we have Argos data? If yes, then drop it from here, and deal with in in Argos data -->
 
 ### Approach 1. Interpolation
 
@@ -417,280 +416,9 @@ new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%
 # then smaller gaps <= gap_thresh can be interpolated with crawlWrap
 ```
 
-## Dealing with location error and irregular time
-Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series. 
-
-<!-- MAM: I moved this from above. But didn't quite check if it' integrated well yet. -->
-Visualize original data that includes Argos location.
-
-```{r plot_original_data, message=FALSE}
-# convert to lines and plot using tmap
-tracks %>% 
-  group_by(ID) %>% 
-  summarise(do_union = FALSE) %>% 
-  st_cast("LINESTRING") %>% 
-  tm_shape() + 
-  tm_sf(col = "ID", palette = "Dark2")
-```
-
-It looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`.
-
-<!-- MAM: why 10 sec? Is there are reason not to go to one sec? -->
-
-```{r offset_duplicate_times, message=FALSE}
-# 1) count the run length of each time step using rle
-run_length <- rle(tracks$dt)$lengths
-# 2) create a sequence of 1:run_length for each time step
-run_seqence <- sequence(run_length)
-# 3) discount each time step that's not a duplicate by multiplying by 0
-run_seqence <- run_seqence*(tracks$dt==0)
-# 4) lag run_sequence by one row and replace the first value by 0,
-# so that we iterate each time that is a duplicate of the previous row
-tracks$duplicate_count <- replace_na(lag(run_seqence), 0)
-# offset duplicate times by 10s
-tracks <- 
-  tracks %>%
-  mutate(time = time + 10*duplicate_count,
-         # recalculate time difference
-         dt = ifelse(ID == lead(ID), 
-    difftime(lead(time), time, units = "mins"), NA
-  ))
-
-# last we ensure there are no identical times
-sum(tracks$time == lead(tracks$time), na.rm = TRUE)
-```
-
-<!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? You might want to explain why. -->
-
-Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location.
-
-```{r speed_filter, message=FALSE}
-# distance from previous location 
-delta_dist <- st_distance(tracks, lag(tracks), by_element=TRUE)
-# time from previous location
-delta_t <- set_units(lag(tracks$dt), "min") 
-# calculate speed
-tracks$spd <- delta_dist/delta_t
-
-# filter speed
-tracks <- tracks %>% 
-  filter(spd < set_units(10, "m/s"))
-
-# convert to lines and plot
-tracks %>% group_by(ID) %>% 
-  summarise(do_union = F) %>% 
-  st_cast("LINESTRING") %>% 
-     tm_shape()+
-   tm_lines(col = "ID", palette = "Dark2")
-```
-
-Already looking much better.
-
-
-location accuracy (ignoring duplicate locations)
-```{r}
-# identify proportion of each location class
-tracks %>% 
-  filter(dt > 0) %>% 
-  {table(.$loc_class)/nrow(tracks)} 
-```
-
-we have to deal with location error, irregular time, and missing locations. The `crawl` model that we fit earlier can be extended to predict tracks from irregular data with location error. In this section, we will cover using `crawlWrap` to amputate regular locations when faced with more difficult data (e.g., ARGOS) and fitting an HMM to multiple imputed data.
-
-<!-- MAM: here you have to put a bit more info on crawl. I.e. it's a state space models that handle error, etc. -->
-
-First let's identify a resolution to work at if only obtained ARGOS data.
-
-```{r select_ARGOS_resolution}
-# filter argos data
-tracks_argos <- filter(tracks, loc_class != "GPS") %>% 
-  # calculate dime difference
-  mutate(dt = ifelse(ID == lead(ID),
-    difftime(lead(time), time, units = "mins"), NA))
-
-# split ARGOS tracks by ID for later steps
-tracks_argos_ls <- tracks_argos %>% 
-  mutate(x = st_coordinates(tracks_argos)[,"X"],  
-         y = st_coordinates(tracks_argos)[,"Y"]) %>%
-  st_drop_geometry() %>% 
-    split(.,.$ID)
-
-# visualise time differences
-hist(tracks_argos$dt[tracks_argos$dt<180], 32, 
-     main = NA, xlab = "Time difference (min)")
-```
-
-In this section, we will use 45 min as a trade-off between higher resolution and minimising data gaps.
-
-Next, we will define model structure for `crawl`. The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)).
-
-```{r fit_45_min_crawl_to_argos_tracks, message=FALSE}
-# define priors
-prior <- function(p) {
-  dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
-  dnorm(p[2], log(500),  0.2, log = TRUE) +  # 2
-  dnorm(p[3], log(1500), 0.2, log = TRUE) +  # 1
-  dnorm(p[4], log(2500), 0.4, log = TRUE) +  # 0
-  dnorm(p[5], log(2500), 0.4, log = TRUE) +  # A
-  dnorm(p[6], log(2500), 0.4, log = TRUE) +  # B
-  # skip p[7] as we won't provide a prior for sigma
-  dnorm(p[8], -3, 3, log = TRUE)  # beta parameter 
-}
-
-# define error model
-err.model <- list(x = ~ loc_class - 1, y = ~ loc_class - 1)
-
-# define times to predict for easier comparison between ARGOS and GPS tracks
-predTime <- lapply(tracks_argos_ls, function(x)
-  seq(first(x$time), last(x$time), "45 min"))
-
-# fit crawl model and predict locations at 45 min time steps
-set.seed(1)
-argos_45_crwOut <- crawlWrap(tracks_argos,
-  timeStep = "45 min",
-  retryFits = 1, Time.name = "time",
-  err.model = err.model,
-  prior = prior, 
-  predTime = predTime) 
-plot(argos_45_crwOut, ask = FALSE)
-# convert to data.frame and extract predicted locations
-crw_argos_45 <- data.frame(argos_45_crwOut$crwPredict) %>% 
-  filter(locType == "p") %>% 
-  dplyr::select(mu.x, mu.y, time, ID) %>% 
-  dplyr::rename(x = "mu.x", y = "mu.y") %>% 
-  {.[-1,]}  # remove first data record as it is not present in the GPS data 
-```
-
-<!-- MAM: I get some pretty daming error message here. -->
-
-For comparison, we will also use `crawlWrap` to interpolate GPS data at a 45 min frequency/
-
-```{r fit_45_min_crawl_to_gps_tracks, message=FALSE}
-set.seed(1)
-crw_gps_45 <- crawlWrap(obsData = tracks_gps, timeStep = "45 mins", 
-                        predTime = predTime) %>% 
-  # convert to data.frame and extract predicted locations
-  {data.frame(.$crwPredict)} %>% 
-  filter(locType == "p") %>% 
-  dplyr::select(mu.x, mu.y, time, ID) %>% 
-  dplyr::rename(x = "mu.x", y = "mu.y")
-
-# compare estimated tracks
-filter(crw_argos_45, ID=="T172062")  %>% 
-plot(y~x, data=., type = 'l', col = 'red', asp=1) 
-filter(crw_gps_45, ID=="T172062") %>% 
-points(y~x, data=., type = 'l')
-```
-
-<!-- MAM: I get some warnings here, that something is going on -->
-
-We see that there is pretty good over lap between the ARGOS (red) and GPS (black) tracks at a 45 min resolution. However, there are some sections where the ARGOS track cuts straight lines through sections where there is variability in the GPS track.
-
-Let's try to fit an HMM to the interpolated ARGOS tracks.
-```{r prep_ARGOS_tracks_and_fit_basic_HMM, message = FALSE}
-set.seed(1)
-# prep tracks
-prep_argos_45 <- prepData(crw_argos_45, type = "UTM")
-prep_gps_45 <- prepData(crw_gps_45, type = "UTM")
-  
-# setup model
-dist <- list(step = "gamma", angle = "vm")
-# Setting up the starting values
-mu0 <- c(1500, 3500) # mu step
-sigma0 <- mu0/2      # Sd step
-kappa0 <- c(1, 4)    # kappa angle
-Par0 <- list(step = c(mu0, sigma0), angle = kappa0)
-
-# Fit a 2 state HMM for 45 min ARGOS and GPS tracks
-HMM_argos_45_basic <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0)
-HMM_gps_45_basic <- fitHMM(prep_gps_45, nbState = 2, dist = dist, Par0 = Par0)
-
-plot(HMM_argos_45_basic, animals = "T172062", ask = F)
-plot(HMM_gps_45_basic, animals = "T172062", ask = F)
-# compare predicted states
-sum(viterbi(HMM_argos_45_basic) == viterbi(HMM_gps_45_basic))/nrow(prep_argos_45)
-```
-
-The interpolated GPS track seems to fit, however the model had some issues fitting the ARGOS data. Further, $<50/%$ of the predicted states from the ARGOS model are the same as the GPS model. I suspect the issue may be due to the large gaps where the interpolated track is basically linear. Indeed, in the GPS HMM, state 1 seems to primarily be classifying the straight interpolated sections as state 1 and the rest as state 2. We can try to address this by nullify gaps using the `prepData_NAGaps` function we defined earlier. In this case, we will nullify gaps $>180$ min
-
-```{r prep_data_and_nullify_gaps}
-# prep 45 min ARGOS data with nullified gaps
-prep_argos_45 <- prepData_NAGaps(track_list = tracks_argos_ls, tracks_crw = crw_argos_45, res = 45, max_gap = 180, type = "UTM")
-
-# prep 45 min gps data with nullified gaps
-prep_gps_45 <- prepData_NAGaps(track_list = tracks_gps_ls, tracks_crw = crw_gps_45, res = 45, max_gap = 180, type = "UTM")
-```
-
-Now, let's try to fit the same HMM as above to this data with large gaps nullified. 
-
-```{r nullified_crawl_HMM_fitHMM_argos, message=FALSE}
-set.seed(1)
-# Fit a 2 state HMM for 45 min ARGOS and GPS tracks
-HMM_argos_45 <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0)
-HMM_gps_45 <- fitHMM(prep_gps_45, nbState = 2, dist = dist, Par0 = Par0)
-
-plot(HMM_argos_45, animals = "T172062", ask = "F")
-plot(HMM_gps_45, animals = "T172062", ask = "F")
-# compare new and original GPS model predicted states
-sum(viterbi(HMM_gps_45_basic) == viterbi(HMM_gps_45))/nrow(prep_argos_45)
-# compare new and original GPS model predicted states
-sum(viterbi(HMM_argos_45) == viterbi(HMM_gps_45))/nrow(prep_argos_45)
-```
-
-Both data sets seem to fit easily. There isn't a large change between this GPS model and the previous one (without nullifying large gaps); $91/%$ of the predicted states are the same. However, the overlap between the ARGOS and GPS models is much higher than previously ($71\%$), suggesting the ARGOS model with nullified gaps is significantly improved. However, there is still a notable discrepancy between the ARGOS and the GPS HMMs.
-
-### Multiple imputation
-
-```{r fit_multiple_imputations}
-
-# define priors
-prior <- function(p) {
-  dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
-  dnorm(p[2], log(500),  0.2, log = TRUE) +  # 2
-  dnorm(p[3], log(1500), 0.2, log = TRUE) +  # 1
-  dnorm(p[4], log(2500), 0.4, log = TRUE) +  # 0
-  dnorm(p[5], log(2500), 0.4, log = TRUE) +  # A
-  dnorm(p[6], log(2500), 0.4, log = TRUE) +  # B
-  # skip p[7] as we won't provide a prior for sigma
-  dnorm(p[8], 4, 2, log = TRUE)  # beta parameter 
-}
-
-# fit crawl model and predict locations at 45 min time steps
-set.seed(1)
-argos_45_crwOut <- crawlWrap(tracks_argos,
-  timeStep = "45 min",
-  retryFits = 1, Time.name = "time",
-  err.model = err.model,
-  prior = prior, 
-  predTime = predTime) 
-
-
-nfsFits <- MIfitHMM(argos_45_crwOut, nSims = 1, fit = F)
-nfsFits <- MIfitHMM(argos_45_crwOut, nSims = 1, nbStates = 2, dist = dist, Par0 = Par0)
-plot(nfsFits)
-set.seed(1)
-
-track_T172066 <- tracks_argos %>% 
-  filter(ID == "T172066")
-argos_45_crwOut_foo1 <- track_T172066 %>% 
-  filter(loc_class %in% c("3","2", "0", "A")) %>% 
-           crawlWrap(timeStep = "45 min",
-  retryFits = 1, Time.name = "time",
-  err.model = err.model,
-  prior = prior, 
-  predTime = predTime$T172066[which(track_T172066$loc_class %in% c("3","2", "0", "A"))]) 
-
-nfsFits <- MIfitHMM(argos_45_crwOut_foo1, nSims = 1, fit = F)
-
-
-
-gps_45_crwOut <- crawlWrap(tracks_gps,
-  timeStep = "45 min", Time.name = "time",
-  predTime = predTime)
-gpsFits <- MIfitHMM(gps_45_crwOut, nSims = 1, fit = F)
-```
-
 ## Integrating dive data
+
+Let's import the dive data and explore it.
 
 ```{r import_depth_data, warning=FALSE}
 dives <- read.csv("data/dives.csv") %>% 
@@ -703,7 +431,7 @@ table(dives$dt)
 
 It appears as though there are relatively few gaps, however the gaps that exist are relatively long (> 60 mins). Therefore, I suggest that we should regularize and nullify the dive data.
 
-```{r regularise depth data, warning=FALSE}
+```{r regularise_depth_data, warning=FALSE}
 # regularise data 
 dives <- dives %>% 
   group_by(ID) %>%
@@ -713,10 +441,9 @@ dives <- dives %>%
   left_join(dives, by = c("ID", "time"))
 ```
 
-
 Next, we have to summarise the time series into concrete data streams that can be modelled in the HMM. We can use the `diveMove` package to identify individual dives and calculate dive statistics. We must first convert the depth data to the `TDR` class for each whale. As we are working with multiple whales, we will use `lapply` to apply the `createTDR` to each whale -- we will also use `lapply` for most of `diveMove` functions. 
 
-```{r convert depth data to TDR, warning=FALSE}
+```{r convert_depth_data_to_TDR, warning=FALSE}
 dives_ls <- split(dives, dives$ID) 
 dive_TDR <- lapply(dives_ls, function(data){
   createTDR(time = data$time, depth = data$depth, dtime = 1.25*60, file = "data/dives.csv")
@@ -728,20 +455,25 @@ plotTDR(dive_TDR[[1]]) # note: try zooming in to part of the dive
 
 Next, we must use the `calibrateDepth` to calibrate the depth data. This function identifies wet and dry periods (for animals that haul out), applies a zero-offset correction (ZOC), and identifies all dives in the record and their phases. ZOC can be done using either the `offset` or `filter` method. In this case, we will assume the depth data is accurate and does not require an offset. We should also specify `dive.thr`, which represents the threshold depth below which an underwater phase should be considered a dive -- in this case, we will set it at 8 m. There are many other optional parameters to identify dives that we will not get into in this tutorial (See `vignette("diveMove")` for details). 
 
-```{r calibrate_TDR, warning=FALSE}
+<!-- MAM: add cache=TRUE to make the kniting faster. Note that sometimes you need to remove the files created, if you run into problems. -->
+
+```{r calibrate_TDR, warning=FALSE, cache=TRUE}
 # calibrate TDR and identify dive phases
 dive_TDR_calib <- lapply(X = dive_TDR, FUN = calibrateDepth, zoc.method = "offset", offset = 0, dive.thr = 8)
 
 # interactive plot of calibrated DTR
-plotTDR(dive_TDR_calib[[1]], surface = T)
+plotTDR(dive_TDR_calib[[1]], surface = TRUE)
 ```
+
 In the interactive plot, try zooming into one of the dives and hover mouse over plot to preview the phases identified by `calibrateDepth'. The phases identified correspond to descent (D), descent/bottom (DB), bottom (B), bottom/ascent (BA), ascent (A), and surface (X). We can plot a specific dives as follows:
-```{r plot TDR_calib dives}
-plotTDR(dive_TDR_calib[[1]], diveNo = 1:300, surface = T)
+
+```{r plot_TDR_calib_dives}
+plotTDR(dive_TDR_calib[[1]], diveNo = 1:300, surface = TRUE)
 ```
+
 Now, we can calculate summary statistics for each dive using the function `diveStats`. There are many dive metrics that are estimated, and which ones to retain are species, data, and question specific. In this case, we will retain 8 from those calculated by `diveStats`: dive time, bottom time,  maximum depth, bottom distance (measure of "wiggling while at the bottom), post-dive duration.
 
-```{r calc summary dive stats}
+```{r calc-summary_dive_stats}
 # calculate dive stats and add dive.id to each dive 
 dive_sum <- lapply(dive_TDR_calib, function(data){
   mutate(diveStats(data, depth.deriv = F), dive.id = row_number()) %>% 
@@ -760,8 +492,12 @@ dives_ls <- mapply(function(TDR, dive_sum){
 # convert dive_ls back to a data.frame
 dives_df <- do.call(rbind, dives_ls)
 ```
+
+<!-- MAM: 75 sec is actually quite long. Is that something that is recommended? Update: from the next comment, it's because of the resolution. Please mention the resolution further up, when presenting the data, and refer back to it here. -->
+
 Next, we will replace any bottom time of a valid dive (dive.id > 0) to 75 s, since at least some time must be spent at the bottom. Then, we will calculate one additional metric as a proxy for dive shape; the ratio of bottom time to dive time. Dives where $\leq20\%$ of the time is spent at the bottom represent V-shaped dives, U-shaped dives are represented when $>20$ and $\leq50\%$ is spent at the bottom, and square dives are represented when $>50\%$ of the time is spent at the bottom. 
-```{r calc percent bottom}
+
+```{r calc_percent_bottom}
 # replace NA bottom time of valid dives
 dives_df$botttim[dives_df$dive.id > 0 & is.na(dives_df$botttim)] <- 75
 # calculate proportion time at bottom
@@ -771,8 +507,10 @@ dives_df <- dives_df %>%
 dives_df <- dives_df %>% 
   filter(!(dive.id > 0 & is.na(divetim)))
 ```
+
 The next issue is that the dive data is at a different temporal resolution (75 s) than the location data (10 min). There are two options to include both data streams in the same HMM. First, we can choose to implement a hierarchical HMM, however, this is more complicated, and  will be covered in tomorrow's tutorial. The second, which we will use here, is to summarise the depth/dive data to a 10 min resolution and include them as additional data streams with step length and turning angle. 
-```{r summarise dive data to 10 min}
+
+```{r summarise_dive_data_to_10 min}
 dives_sum <- dives_df %>% 
   # round time to same interval as location data
   mutate(time = floor_date(time, "10 min")) %>% 
@@ -795,6 +533,7 @@ dives_sum <- dives_df %>%
 # preview
 head(dives_sum)
 ```
+
 Note, we used 2 different `ifelse` statements. First, `ifelse(NA_t == 10, ...)` ensured that we only calculate mean and maximum depth for periods where we have at least 1.25 min of depth data. Second, `ifelse(surf_t > 5, ...)` ensured that we only calculate dive metrics when at least half of the 10 min interval is spent in a dive, otherwise the animal is assumed to be at the surface and its dive metric is `NA`.
 
 Any of the eight variables can be used as data streams in the HMM, however, including too many would significantly increase the number of parameters to estimate, and consequently computation time. Therefore, we must select which variables to use, which there are different several approaches:
@@ -809,7 +548,9 @@ Any of the eight variables can be used as data streams in the HMM, however, incl
 Assuming all the variables are biologically relevant, let's look at structure in the data.
 I will also add a subjective score based on the results (first number after `#` symbol).
 
-```{r data structure}
+<!-- MAM: break down this chunk and add explanations for each bits -->
+
+```{r data_structure}
 vars <- c("mean_dep","max_dep","dive_t","bott_t","prop_bott",
           "max_dive_dep","bott_dist","post_dive_dur")
 # First, missing data
@@ -839,7 +580,7 @@ hist(log(dives_sum$bott_dist), 100)     # 2 moderate structure, high dispersion
 hist(log(dives_sum$post_dive_dur), 100) # 0 little structure, high dispersion
 
 # Third, balanced autocorrelation
-dives_sum_filter <- filter(dives_sum, ID == 172062)
+dives_sum_filter <- filter(dives_sum, ID == "T172062")
 acf(dives_sum_filter$mean_dep, na.action = na.pass)       # 1 ACF~8 some variability
 acf(dives_sum_filter$max_dep, na.action = na.pass)        # 2 ACF~8 gradual decline
 acf(dives_sum_filter$dive_t, na.action = na.pass)         # 2 ACF~7 gradual decline
@@ -856,18 +597,19 @@ data.frame(var = c("mean_dep", "max_dep", "dive_t", "bott_t", "prop_bott",
                      1, 4, 4, 1))
 
 ```
+
 From my subjective interpretation of these outputs, I think the five most promising variables to include are maximum depth, dive time, mean depth, maximum dive depth, and bottom distribution. Next, let's merge the dive data streams the location data.
 
-```{r merge track & dive data.}
+```{r merge_track_and_dive_data}
 tracks_dives <- left_join(prep_tracks_gps_crw_NAgaps, 
                           dives_sum[,c("ID", "time", "max_dep", "dive_t", 
                                        "mean_dep", "max_dive_dep", "bott_dist")], 
                           by = c("ID", "time"))
 ```
 
-Now, we must check for co-linearity between the data streams to select 1--3 to use in the HMM. We can check co-linearity using the Paerson's correlation matrix.
+Now, we must check for co-linearity between the data streams to select 1--3 to use in the HMM. We can check co-linearity using the Pearson's correlation matrix.
 
-```{r dive co-linearity}
+```{r dive_co_linearity}
 # calculate and plot check Paerson's correlation matrix
 tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", 
              "bott_dist", "step", "angle")] %>% 
@@ -875,9 +617,13 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
   cor() %>% 
   corrplot(method="number")
 ```
+
 `step` and `angle` seem quit independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, se we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`. 
 
+<!-- MAM: HMM assumes that the response variables are conditionally independent base on the state. You may want to mention that. Some of that correlation could be explained by the state, -->
+
 To get starting parameters, we can fit an HMM to each one independently. We will use the gamma distribution for both and for now will use the same starting parameters.
+
 ```{r prep_dive_data_and_independent_HMMs, message=FALSE}
 # identify whether there is 0 data
 tracks_dives %>% 
@@ -897,9 +643,10 @@ HMM_max_dep <- fitHMM(tracks_dives, nbStates = 2, dist = list(max_dep = "gamma")
 HMM_bott_dist <- fitHMM(tracks_dives, nbStates = 2, dist = list(bott_dist = "gamma"), 
                         Par0 = list(bott_dist = c(mu0, sigma0, zm)))
 ```
+
 Next, we can integrate these into one HMM together with step length and turning angle. When we specify the starting parameters, we want to think about how the states may look. For example, we might expect one resident state with slower movement, lower angular concentration, deeper dives, and greater at-depth variability. The second state may be travel, with faster movement, greater angular concentration, shallower dives, and less  at-depth variability.
 
-```{r prep data for dive & move HMM}
+```{r prep_data_for_dive_move_HMM}
 # prep model
 stateNames = c("resident", "travel")
 nbStates = length(stateNames)
@@ -924,24 +671,27 @@ dist = list(step = "gamma", angle = "vm", max_dep = "gamma", bott_dist =  "gamma
 ```
 
 Now, we can fit the HMM with movement and dive variables.
-```{r fit move & dive HMM, message=F}
+```{r fit_move_dive_HMM, message=FALSE, cache=TRUE}
 set.seed(1)
 HMM_move_dive <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 ```
 
 Let's see what it looks like.
-```{r view HMM_move_dive}
+```{r view_HMM_move_dive}
 plot(HMM_move_dive, breaks = 100, ask = F)
 plotPR(HMM_move_dive)
 ```
+
 The tracks look interesting. But there are some issues in the pseudo residuals.
+
 Looking at the QQ plots the model appears to:
 - overestimate the number of fast movement steps
 - underestimating higher turning angles
 - underestimate shallow dives and over estimate deep dives
 - really wonky description of `bott_dist`
 The autocorrelation functions suggest there is remnant autocorrelation in `step` and `max_dep` that are not well described by the model. Together, this information suggests that there may be additional states that are not represented. Let's try to add one more state with an intermediate speed, lower angle concentration, and shallow dives.
-```{r 3-state dive & move HMM, message=FALSE}
+
+```{r 3_state_dive_and_move_HMM, message=FALSE, cache=TRUE}
 # define states
 stateNames <- c("resident", "travel", "search")
 nbStates <- length(stateNames)
@@ -966,12 +716,14 @@ set.seed(1)
 HMM_move_dive_3s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 ```
 
-```{r review 3-state HMM}
+```{r review_3_state_HMM}
 plotPR(HMM_move_dive_3s)
-plot(HMM_move_dive_3s, breaks = 100, ask = F)
+plot(HMM_move_dive_3s, breaks = 100, ask = FALSE)
 ```
+
 Interestingly, the `step` and `angle` QQ-plots were not improved much, though the `step` ACF was improved. However, compared to the 2-state model, there was a drastic improvement in QQ-plot and ACF the `max_dep` data stream and marginal improvement in the `bott_dist` data stream. The newly described state appears to have very low step length, really wide turning angle, minimal diving, and minimal at-depth activity, which may actually be indicative of resting. The "resident" state has intermediate speed and turning angle, but very deep dives and high at-depth activity, suggesting it may represent foraging. Let's try to fit one more 4-state HMM, to try and address the remaining residuals: intermediate speed, lower angle concentration, and more intermediate dives, which may represent searching behaviour.
-```{r 4-state HMM}
+
+```{r 4_state_HMM, cache=TRUE}
 # define states
 stateNames <- c("forage", "travel", "rest", "search")
 nbStates <- length(stateNames)
@@ -990,7 +742,7 @@ nbStates <- length(stateNames)
                   Pars$bott_dist[c(7:9)], Pars$bott_dist[9]) # zm
   Par0 <- list(step = step0, angle = angle0, max_dep = max_dep0, bott_dist = bott_dist0)
 
-# fit 3-state HM
+# fit 4-state HM
 set.seed(1)
 HMM_move_dive_4s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 
@@ -998,270 +750,549 @@ HMM_move_dive_4s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateName
 plotPR(HMM_move_dive_4s)
 plot(HMM_move_dive_4s, breaks = 200)
 ```
+
 The QQ-plot for `step` is quite a bit improved, as is for `bott_dist`. The ACF for `step` is also quite improved. At this point, I'm not sure the model can be significantly improved with the existing data. Although HMMs with different number of states generally shouldn't be compared, since AIC generally favours more states, it is a good sanity check. 
+
+<!-- MAM: maybe reference Pohle for some of these statements -->
 ```{r HMM state AIC}
 AIC(HMM_move_dive, HMM_move_dive_3s, HMM_move_dive_4s)
 ```
 
 
 
-## play
-```{r}
-# plot states
-model <- HMM_max_dep
-dat <- tracks_dives %>% 
-  mutate(max_dep = (max_dep),
-         bott_dist = (bott_dist),
-         state = viterbi(model)) %>% 
-  dplyr::select(max_dep, bott_dist, step, angle, state) 
+<!-- ## play -->
+<!-- ```{r} -->
+<!-- # plot states -->
+<!-- model <- HMM_max_dep -->
+<!-- dat <- tracks_dives %>%  -->
+<!--   mutate(max_dep = (max_dep), -->
+<!--          bott_dist = (bott_dist), -->
+<!--          state = viterbi(model)) %>%  -->
+<!--   dplyr::select(max_dep, bott_dist, step, angle, state)  -->
 
-plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1)
-```
+<!-- plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1) -->
+<!-- ``` -->
 
-One additional option to select which dive data stream to use, is to  and examine which performs better. All of dive data streams are zero-bound, therefore, we can the gamma, log normal, or Weibull distrutions to describe them. For simplicity, we will use the gamma for all, and also divide each data stream by its respective standard deviation to standardise them. 
+<!-- One additional option to select which dive data stream to use, is to  and examine which performs better. All of dive data streams are zero-bound, therefore, we can the gamma, log normal, or Weibull distrutions to describe them. For simplicity, we will use the gamma for all, and also divide each data stream by its respective standard deviation to standardise them.  -->
 
-```{r prep dive data and independent HMMs, message=FALSE}
-# standardise dive variables (not necessary)
-tracks_dives_prep <- tracks_dives %>% 
-  mutate(max_dep = max_dep/sd(max_dep, na.rm = T), 
-         dive_t = dive_t/sd(dive_t, na.rm = T), 
-         mean_dep = mean_dep/sd(mean_dep, na.rm = T), 
-         max_dive_dep = max_dive_dep/sd(max_dive_dep, na.rm = T), 
-         bott_dist = bott_dist/sd(bott_dist, na.rm = T)) 
+<!-- ```{r prep dive data and independent HMMs, message=FALSE} -->
+<!-- # standardise dive variables (not necessary) -->
+<!-- tracks_dives_prep <- tracks_dives %>%  -->
+<!--   mutate(max_dep = max_dep/sd(max_dep, na.rm = T),  -->
+<!--          dive_t = dive_t/sd(dive_t, na.rm = T),  -->
+<!--          mean_dep = mean_dep/sd(mean_dep, na.rm = T),  -->
+<!--          max_dive_dep = max_dive_dep/sd(max_dive_dep, na.rm = T),  -->
+<!--          bott_dist = bott_dist/sd(bott_dist, na.rm = T))  -->
 
-# identify whether there is 0 data
-tracks_dives %>% 
-  summarise(max_dep = sum(max_dep==0, na.rm = T), 
-            dive_t = sum(dive_t==0, na.rm = T), 
-            mean_dep = sum(mean_dep==0, na.rm = T), 
-            max_dive_dep = sum(max_dive_dep==0, na.rm = T), 
-            bott_dist = sum(bott_dist==0, na.rm = T)) 
-# therefore, we need to include zero-mass parameters for dive_t and bott_dist
+<!-- # identify whether there is 0 data -->
+<!-- tracks_dives %>%  -->
+<!--   summarise(max_dep = sum(max_dep==0, na.rm = T),  -->
+<!--             dive_t = sum(dive_t==0, na.rm = T),  -->
+<!--             mean_dep = sum(mean_dep==0, na.rm = T),  -->
+<!--             max_dive_dep = sum(max_dive_dep==0, na.rm = T),  -->
+<!--             bott_dist = sum(bott_dist==0, na.rm = T))  -->
+<!-- # therefore, we need to include zero-mass parameters for dive_t and bott_dist -->
 
-# fit dive-only HMMs
-set.seed(1)
-HMM_max_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dep="gamma"), 
-                      Par0 = list(max_dep = c(mu0, sigma0)))
-HMM_dive_t <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(dive_t="gamma"), 
-                     Par0 = list(dive_t = c(mu0, sigma0, zm)))
-HMM_mean_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(mean_dep="gamma"), 
-                       Par0 = list(mean_dep = c(mu0, sigma0)))
-HMM_max_dive_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dive_dep="gamma"),
-                           Par0 = list(max_dive_dep = c(mu0, sigma0)))
-HMM_bott_dist <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(bott_dist="gamma"), 
-                        Par0 = list(bott_dist = c(mu0, sigma0, zm)))
-```
-Now, to compare the models, we cannot use standard metrics of AIC, likelihood, or r$^2$ since the response data (the dive variables) are all different. However, we can look at metrics of 
-```{r compare dive-only HMMs, message=FALSE}
-plotPR(HMM_max_dep)
-plotPR(HMM_dive_t)
-plotPR(HMM_mean_dep)
-plotPR(HMM_max_dive_dep)
-plotPR(HMM_bott_dist)
+<!-- # fit dive-only HMMs -->
+<!-- set.seed(1) -->
+<!-- HMM_max_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dep="gamma"),  -->
+<!--                       Par0 = list(max_dep = c(mu0, sigma0))) -->
+<!-- HMM_dive_t <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(dive_t="gamma"),  -->
+<!--                      Par0 = list(dive_t = c(mu0, sigma0, zm))) -->
+<!-- HMM_mean_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(mean_dep="gamma"),  -->
+<!--                        Par0 = list(mean_dep = c(mu0, sigma0))) -->
+<!-- HMM_max_dive_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dive_dep="gamma"), -->
+<!--                            Par0 = list(max_dive_dep = c(mu0, sigma0))) -->
+<!-- HMM_bott_dist <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(bott_dist="gamma"),  -->
+<!--                         Par0 = list(bott_dist = c(mu0, sigma0, zm))) -->
+<!-- ``` -->
+<!-- Now, to compare the models, we cannot use standard metrics of AIC, likelihood, or r$^2$ since the response data (the dive variables) are all different. However, we can look at metrics of  -->
+<!-- ```{r compare dive-only HMMs, message=FALSE} -->
+<!-- plotPR(HMM_max_dep) -->
+<!-- plotPR(HMM_dive_t) -->
+<!-- plotPR(HMM_mean_dep) -->
+<!-- plotPR(HMM_max_dive_dep) -->
+<!-- plotPR(HMM_bott_dist) -->
 
-plot(HMM_max_dep, ask = F)
-plot(HMM_dive_t, ask = F)
-plot(HMM_mean_dep, ask = T)
-plot(HMM_max_dive_dep, ask = T)
-plot(HMM_bott_dist, ask = F)
-plot(HMM_gps_crw_NAgaps, ask = F)
+<!-- plot(HMM_max_dep, ask = F) -->
+<!-- plot(HMM_dive_t, ask = F) -->
+<!-- plot(HMM_mean_dep, ask = T) -->
+<!-- plot(HMM_max_dive_dep, ask = T) -->
+<!-- plot(HMM_bott_dist, ask = F) -->
+<!-- plot(HMM_gps_crw_NAgaps, ask = F) -->
 
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = mean_dep)) + 
-  geom_point() + theme_classic()  # 1
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = max_dep)) + 
-  geom_point() + theme_classic()  # 1
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = dive_t)) + 
-  geom_point() + theme_classic() #  1
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = max_dive_dep)) + 
-  geom_point() + theme_classic() # 
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = bott_dist)) + 
-  geom_point() + theme_classic() # 
-
-
-AIC(HMM_max_dep, HMM_dive_t, HMM_mean_dep, HMM_max_dive_dep, HMM_bott_dist)
-
-f <- which(!is.na(prep_tracks_gps_crw_NAgaps$step))
-states_sa <- viterbi(HMM_gps_crw_NAgaps)[f]
-
-data.frame(max_dep = sum(viterbi(HMM_max_dep)[f]==states_sa),
-           dive_t = sum(viterbi(HMM_dive_t)[f]==states_sa),
-           mean_dep = sum(viterbi(HMM_mean_dep)[f]==states_sa),
-           max_dive_dep = sum(viterbi(HMM_max_dive_dep)[f]==states_sa),
-           bott_dist = sum(viterbi(HMM_bott_dist)[f]==states_sa))
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = mean_dep)) +  -->
+<!--   geom_point() + theme_classic()  # 1 -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = max_dep)) +  -->
+<!--   geom_point() + theme_classic()  # 1 -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = dive_t)) +  -->
+<!--   geom_point() + theme_classic() #  1 -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = max_dive_dep)) +  -->
+<!--   geom_point() + theme_classic() #  -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = bott_dist)) +  -->
+<!--   geom_point() + theme_classic() #  -->
 
 
-library(psych)
+<!-- AIC(HMM_max_dep, HMM_dive_t, HMM_mean_dep, HMM_max_dive_dep, HMM_bott_dist) -->
 
-pairs.panels(tracks_dives_prep[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", 
-             "bott_dist", "step", "angle")],
-             gap = 0,
-             pch=21)
+<!-- f <- which(!is.na(prep_tracks_gps_crw_NAgaps$step)) -->
+<!-- states_sa <- viterbi(HMM_gps_crw_NAgaps)[f] -->
 
-pairs.panels(cbind(tracks_dives_prep[,c("max_dep", "bott_dist", "step")],
-                   abs(tracks_dives_prep[,c("angle")])),
-             gap = 0,
-             pch=20)
-# plot states
-dat <- tracks_dives_prep %>% 
-  mutate(max_dep = log(max_dep),
-         bott_dist = log(bott_dist),
-         state = viterbi(HMM_move_dive_3s)) %>% 
-  dplyr::select(max_dep, bott_dist, step, angle, state) 
-ggplot(dat, aes(x = step, y = angle, col = state)) + 
-  geom_point(shape = 20)
-ggplot(dat, aes(x = step, y = max_dep, col = state)) + 
-  geom_point(shape = 20)
-library(plotly)
-plot_ly(dat, x = ~log(step), y = ~abs(angle), z = ~-max_dep, color = ~factor(state), size = 1)
-plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,  size = 1)
-plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1)
-plot_ly(dat, x = ~log(step), y = ~bott_dist, z = ~-max_dep,color = ~factor(state),  size = 1)
-
-plot_ly(dat, x = ~step, y = ~max_dep, z = ~bott_dist, size = 1)
-plot_ly(dat, x = ~abs(angle), y = ~max_dep, z = ~bott_dist, size = 1)
-
-# PCA
-dat <- tracks_dives_prep %>% 
-  mutate(max_dep = log(max_dep),
-         bott_dist = log(bott_dist),
-         state = viterbi(HMM_move_dive_3s)) %>% 
-  dplyr::select(max_dep, bott_dist, step, angle) %>% 
-  na.omit() %>% 
-  {.[!is.infinite(rowSums(.)),]}
-
-pairs.panels(dat,
-             
-             gap = 0,
-             pch=20)
-pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "bott_dist", "step", "angle")])),
-                         c("max_dep", "bott_dist", "step", "angle")]),
-             center = TRUE,
-            scale. = TRUE)
-print(pc)
-ggplot(dat, aes(x = step, y = angle, col = state)) + 
-  geom_point()
-# PCA
-dat <- tracks_dives_prep %>% 
-  mutate(mean_dep = log(mean_dep),
-         max_dep = log(max_dep),
-         dive_t = log(dive_t),
-         bott_t = log(bott_t),
-         prop_bott = logit(prop_bott),
-         max_dive_dep = log(max_dive_dep),
-         bott_dist = log(bott_dist),
-         post_dive_dur = log(post_dive_dur),
-         state = viterbi(HMM_gps_crw_NAgaps)) %>% 
-  dplyr::select(max_dep, dive_t, mean_dep, max_dive_dep, bott_dist, step, angle) %>% 
-  na.omit() %>% 
-  {.[!is.infinite(rowSums(.)),]}
-
-pairs.panels(dat,
-             gap = 0,
-             pch=21)
-dat %>% 
-cor() %>% 
-  corrplot(method="number")
-
-tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", 
-             "bott_dist", "step", "angle")] %>% 
-  na.omit() %>% {.[!is.infinite(rowSums(.)),]} %>% nrow()
-
-pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])),
-                         c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")]),
-             center = TRUE,
-            scale. = TRUE)
-attributes(pc)
-print(pc)
-library(factoextra)
-fviz_eig(pc)
-groups <- as.factor(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])),])[,"state"])
-fviz_pca_ind(pc,
-             col.ind = groups, # color by groups
-             palette = c("#00AFBB",  "#FC4E07"),
-             addEllipses = TRUE, # Concentration ellipses
-             ellipse.type = "confidence",
-             legend.title = "Groups",
-             repel = TRUE
-             )
-
-library(ggfortify)
-df <- iris[1:4]
-pca_res <- prcomp(df, scale. = TRUE)
-
-autoplot(pca_res)
-```
+<!-- data.frame(max_dep = sum(viterbi(HMM_max_dep)[f]==states_sa), -->
+<!--            dive_t = sum(viterbi(HMM_dive_t)[f]==states_sa), -->
+<!--            mean_dep = sum(viterbi(HMM_mean_dep)[f]==states_sa), -->
+<!--            max_dive_dep = sum(viterbi(HMM_max_dive_dep)[f]==states_sa), -->
+<!--            bott_dist = sum(viterbi(HMM_bott_dist)[f]==states_sa)) -->
 
 
+<!-- library(psych) -->
+
+<!-- pairs.panels(tracks_dives_prep[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",  -->
+<!--              "bott_dist", "step", "angle")], -->
+<!--              gap = 0, -->
+<!--              pch=21) -->
+
+<!-- pairs.panels(cbind(tracks_dives_prep[,c("max_dep", "bott_dist", "step")], -->
+<!--                    abs(tracks_dives_prep[,c("angle")])), -->
+<!--              gap = 0, -->
+<!--              pch=20) -->
+<!-- # plot states -->
+<!-- dat <- tracks_dives_prep %>%  -->
+<!--   mutate(max_dep = log(max_dep), -->
+<!--          bott_dist = log(bott_dist), -->
+<!--          state = viterbi(HMM_move_dive_3s)) %>%  -->
+<!--   dplyr::select(max_dep, bott_dist, step, angle, state)  -->
+<!-- ggplot(dat, aes(x = step, y = angle, col = state)) +  -->
+<!--   geom_point(shape = 20) -->
+<!-- ggplot(dat, aes(x = step, y = max_dep, col = state)) +  -->
+<!--   geom_point(shape = 20) -->
+<!-- library(plotly) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~abs(angle), z = ~-max_dep, color = ~factor(state), size = 1) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,  size = 1) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~bott_dist, z = ~-max_dep,color = ~factor(state),  size = 1) -->
+
+<!-- plot_ly(dat, x = ~step, y = ~max_dep, z = ~bott_dist, size = 1) -->
+<!-- plot_ly(dat, x = ~abs(angle), y = ~max_dep, z = ~bott_dist, size = 1) -->
+
+<!-- # PCA -->
+<!-- dat <- tracks_dives_prep %>%  -->
+<!--   mutate(max_dep = log(max_dep), -->
+<!--          bott_dist = log(bott_dist), -->
+<!--          state = viterbi(HMM_move_dive_3s)) %>%  -->
+<!--   dplyr::select(max_dep, bott_dist, step, angle) %>%  -->
+<!--   na.omit() %>%  -->
+<!--   {.[!is.infinite(rowSums(.)),]} -->
+
+<!-- pairs.panels(dat, -->
+
+<!--              gap = 0, -->
+<!--              pch=20) -->
+<!-- pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "bott_dist", "step", "angle")])), -->
+<!--                          c("max_dep", "bott_dist", "step", "angle")]), -->
+<!--              center = TRUE, -->
+<!--             scale. = TRUE) -->
+<!-- print(pc) -->
+<!-- ggplot(dat, aes(x = step, y = angle, col = state)) +  -->
+<!--   geom_point() -->
+<!-- # PCA -->
+<!-- dat <- tracks_dives_prep %>%  -->
+<!--   mutate(mean_dep = log(mean_dep), -->
+<!--          max_dep = log(max_dep), -->
+<!--          dive_t = log(dive_t), -->
+<!--          bott_t = log(bott_t), -->
+<!--          prop_bott = logit(prop_bott), -->
+<!--          max_dive_dep = log(max_dive_dep), -->
+<!--          bott_dist = log(bott_dist), -->
+<!--          post_dive_dur = log(post_dive_dur), -->
+<!--          state = viterbi(HMM_gps_crw_NAgaps)) %>%  -->
+<!--   dplyr::select(max_dep, dive_t, mean_dep, max_dive_dep, bott_dist, step, angle) %>%  -->
+<!--   na.omit() %>%  -->
+<!--   {.[!is.infinite(rowSums(.)),]} -->
+
+<!-- pairs.panels(dat, -->
+<!--              gap = 0, -->
+<!--              pch=21) -->
+<!-- dat %>%  -->
+<!-- cor() %>%  -->
+<!--   corrplot(method="number") -->
+
+<!-- tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",  -->
+<!--              "bott_dist", "step", "angle")] %>%  -->
+<!--   na.omit() %>% {.[!is.infinite(rowSums(.)),]} %>% nrow() -->
+
+<!-- pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])), -->
+<!--                          c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")]), -->
+<!--              center = TRUE, -->
+<!--             scale. = TRUE) -->
+<!-- attributes(pc) -->
+<!-- print(pc) -->
+<!-- library(factoextra) -->
+<!-- fviz_eig(pc) -->
+<!-- groups <- as.factor(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])),])[,"state"]) -->
+<!-- fviz_pca_ind(pc, -->
+<!--              col.ind = groups, # color by groups -->
+<!--              palette = c("#00AFBB",  "#FC4E07"), -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              ellipse.type = "confidence", -->
+<!--              legend.title = "Groups", -->
+<!--              repel = TRUE -->
+<!--              ) -->
+
+<!-- library(ggfortify) -->
+<!-- df <- iris[1:4] -->
+<!-- pca_res <- prcomp(df, scale. = TRUE) -->
+
+<!-- autoplot(pca_res) -->
+<!-- ``` -->
 
 
 
 
 
 
-```{r calibrate_TDR_extra, warning=FALSE}
-i = 0
-plot(dives$depth*-1, pch = 19, type = 'l', xlim = c(1,8)+8*i, ylim = c(-100,0)); i = i+1
-i = 0
-plot(dives$dt, pch = 19, xlim = c(1,100)+100*i); i = i+1
-# regularise dive
-hist(dives$depth,2000, xlim = c(0,200))
+
+
+<!-- ```{r calibrate_TDR_extra, warning=FALSE} -->
+<!-- i = 0 -->
+<!-- plot(dives$depth*-1, pch = 19, type = 'l', xlim = c(1,8)+8*i, ylim = c(-100,0)); i = i+1 -->
+<!-- i = 0 -->
+<!-- plot(dives$dt, pch = 19, xlim = c(1,100)+100*i); i = i+1 -->
+<!-- # regularise dive -->
+<!-- hist(dives$depth,2000, xlim = c(0,200)) -->
 
 
 
 
-# round time to nearest 10 min
-# summarise 
-## max depth
-## mean depth
-## 3rd quantile of depth 
-## number of dives
-## number small vs short dives 
-## time at depth
-## percent to bottom
-## depth variance
-## dive type (which dive is most )
-# method of summary strongly depends on resolution of HMM. in some cases, individual dives can last longer than the HMM step, and depending on when within the 10 min step a dive starts, we may capture the entirety or just a portion of the dive (e.g., ascent, and descent). Conversely, with lower time locations, we may have a number of dives in each step that must be summarised (e.g., number of dives)
+<!-- # round time to nearest 10 min -->
+<!-- # summarise  -->
+<!-- ## max depth -->
+<!-- ## mean depth -->
+<!-- ## 3rd quantile of depth  -->
+<!-- ## number of dives -->
+<!-- ## number small vs short dives  -->
+<!-- ## time at depth -->
+<!-- ## percent to bottom -->
+<!-- ## depth variance -->
+<!-- ## dive type (which dive is most ) -->
+<!-- # method of summary strongly depends on resolution of HMM. in some cases, individual dives can last longer than the HMM step, and depending on when within the 10 min step a dive starts, we may capture the entirety or just a portion of the dive (e.g., ascent, and descent). Conversely, with lower time locations, we may have a number of dives in each step that must be summarised (e.g., number of dives) -->
 
-library(terra)
-bath <- rast("data/gebco_2022_n74.0_s71.5_w-82.0_e-77.0.tif") %>% 
-  crop(ext(-82, -76, 72, 73))
-
-
+<!-- library(terra) -->
+<!-- bath <- rast("data/gebco_2022_n74.0_s71.5_w-82.0_e-77.0.tif") %>%  -->
+<!--   crop(ext(-82, -76, 72, 73)) -->
 
 
 
-```
 
-```{r plot all tracks}
-# convert to lines and plot using tmap
-tracks %>% group_by(ID) %>% 
-  summarise(do_union = F) %>% 
-  st_cast("LINESTRING") %>% 
-     tm_shape() +
-   tm_lines(col = "ID", palette = "Dark2")
 
-```
+<!-- ``` -->
 
-```{r}
-# first passage time
-tracks_high <- filter(tracks, loc_class %in% c("GPS", 3, 2, 1))
-ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks_high)[,"X"],
-                             st_coordinates(tracks_high)[,"Y"]),
-                  date = tracks_high$time, id=factor(tracks_high$ID))
-fpt_low <- fpt(ltraj, seq(100, 3000, length=100), units = "hours") %>% 
-  varlogfpt() 
-fpt_med <- fpt(ltraj, seq(3000, 20000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt(ltraj, 1500, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-fpt(ltraj, 15000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-fpt(ltraj, 40000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-# looks like there are are increases/plateaus of variance at around 1.5, 15, 40, & 80 km
-```
+<!-- ```{r plot all tracks} -->
+<!-- # convert to lines and plot using tmap -->
+<!-- tracks %>% group_by(ID) %>%  -->
+<!--   summarise(do_union = F) %>%  -->
+<!--   st_cast("LINESTRING") %>%  -->
+<!--      tm_shape() + -->
+<!--    tm_lines(col = "ID", palette = "Dark2") -->
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- # first passage time -->
+<!-- tracks_high <- filter(tracks, loc_class %in% c("GPS", 3, 2, 1)) -->
+<!-- ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks_high)[,"X"], -->
+<!--                              st_coordinates(tracks_high)[,"Y"]), -->
+<!--                   date = tracks_high$time, id=factor(tracks_high$ID)) -->
+<!-- fpt_low <- fpt(ltraj, seq(100, 3000, length=100), units = "hours") %>%  -->
+<!--   varlogfpt()  -->
+<!-- fpt_med <- fpt(ltraj, seq(3000, 20000, length=200), units = "hours") %>%  -->
+<!--   varlogfpt() -->
+<!-- fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>%  -->
+<!--   varlogfpt() -->
+<!-- fpt(ltraj, 1500, units = "hours") %>% unlist %>% mean(na.rm = T)/40 -->
+<!-- fpt(ltraj, 15000, units = "hours") %>% unlist %>% mean(na.rm = T)/40 -->
+<!-- fpt(ltraj, 40000, units = "hours") %>% unlist %>% mean(na.rm = T)/40 -->
+<!-- # looks like there are are increases/plateaus of variance at around 1.5, 15, 40, & 80 km -->
+<!-- ``` -->
+
+
+<!-- Argos data section - for now removed. We could do an extra tutorial. -->
+
+<!-- ## Dealing with location error and irregular time -->
+<!-- Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series.  -->
+
+<!-- <!-- MAM: I moved this from above. But didn't quite check if it' integrated well yet. --> -->
+<!-- Visualize original data that includes Argos location. -->
+
+<!-- ```{r plot_original_data, message=FALSE} -->
+<!-- # convert to lines and plot using tmap -->
+<!-- tracks %>%  -->
+<!--   group_by(ID) %>%  -->
+<!--   summarise(do_union = FALSE) %>%  -->
+<!--   st_cast("LINESTRING") %>%  -->
+<!--   tm_shape() +  -->
+<!--   tm_sf(col = "ID", palette = "Dark2") -->
+<!-- ``` -->
+
+<!-- It looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`. -->
+
+<!-- <!-- MAM: why 10 sec? Is there are reason not to go to one sec? --> -->
+
+<!-- ```{r offset_duplicate_times, message=FALSE} -->
+<!-- # 1) count the run length of each time step using rle -->
+<!-- run_length <- rle(tracks$dt)$lengths -->
+<!-- # 2) create a sequence of 1:run_length for each time step -->
+<!-- run_seqence <- sequence(run_length) -->
+<!-- # 3) discount each time step that's not a duplicate by multiplying by 0 -->
+<!-- run_seqence <- run_seqence*(tracks$dt==0) -->
+<!-- # 4) lag run_sequence by one row and replace the first value by 0, -->
+<!-- # so that we iterate each time that is a duplicate of the previous row -->
+<!-- tracks$duplicate_count <- replace_na(lag(run_seqence), 0) -->
+<!-- # offset duplicate times by 10s -->
+<!-- tracks <-  -->
+<!--   tracks %>% -->
+<!--   mutate(time = time + 10*duplicate_count, -->
+<!--          # recalculate time difference -->
+<!--          dt = ifelse(ID == lead(ID),  -->
+<!--     difftime(lead(time), time, units = "mins"), NA -->
+<!--   )) -->
+
+<!-- # last we ensure there are no identical times -->
+<!-- sum(tracks$time == lead(tracks$time), na.rm = TRUE) -->
+<!-- ``` -->
+
+<!-- <!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? You might want to explain why. --> -->
+
+<!-- Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location. -->
+
+<!-- ```{r speed_filter, message=FALSE} -->
+<!-- # distance from previous location  -->
+<!-- delta_dist <- st_distance(tracks, lag(tracks), by_element=TRUE) -->
+<!-- # time from previous location -->
+<!-- delta_t <- set_units(lag(tracks$dt), "min")  -->
+<!-- # calculate speed -->
+<!-- tracks$spd <- delta_dist/delta_t -->
+
+<!-- # filter speed -->
+<!-- tracks <- tracks %>%  -->
+<!--   filter(spd < set_units(10, "m/s")) -->
+
+<!-- # convert to lines and plot -->
+<!-- tracks %>% group_by(ID) %>%  -->
+<!--   summarise(do_union = F) %>%  -->
+<!--   st_cast("LINESTRING") %>%  -->
+<!--      tm_shape()+ -->
+<!--    tm_lines(col = "ID", palette = "Dark2") -->
+<!-- ``` -->
+
+<!-- Already looking much better. -->
+
+
+<!-- location accuracy (ignoring duplicate locations) -->
+<!-- ```{r} -->
+<!-- # identify proportion of each location class -->
+<!-- tracks %>%  -->
+<!--   filter(dt > 0) %>%  -->
+<!--   {table(.$loc_class)/nrow(tracks)}  -->
+<!-- ``` -->
+
+<!-- we have to deal with location error, irregular time, and missing locations. The `crawl` model that we fit earlier can be extended to predict tracks from irregular data with location error. In this section, we will cover using `crawlWrap` to amputate regular locations when faced with more difficult data (e.g., ARGOS) and fitting an HMM to multiple imputed data. -->
+
+<!-- <!-- MAM: here you have to put a bit more info on crawl. I.e. it's a state space models that handle error, etc. --> -->
+
+<!-- First let's identify a resolution to work at if only obtained ARGOS data. -->
+
+<!-- ```{r select_ARGOS_resolution} -->
+<!-- # filter argos data -->
+<!-- tracks_argos <- filter(tracks, loc_class != "GPS") %>%  -->
+<!--   # calculate dime difference -->
+<!--   mutate(dt = ifelse(ID == lead(ID), -->
+<!--     difftime(lead(time), time, units = "mins"), NA)) -->
+
+<!-- # split ARGOS tracks by ID for later steps -->
+<!-- tracks_argos_ls <- tracks_argos %>%  -->
+<!--   mutate(x = st_coordinates(tracks_argos)[,"X"],   -->
+<!--          y = st_coordinates(tracks_argos)[,"Y"]) %>% -->
+<!--   st_drop_geometry() %>%  -->
+<!--     split(.,.$ID) -->
+
+<!-- # visualise time differences -->
+<!-- hist(tracks_argos$dt[tracks_argos$dt<180], 32,  -->
+<!--      main = NA, xlab = "Time difference (min)") -->
+<!-- ``` -->
+
+<!-- In this section, we will use 45 min as a trade-off between higher resolution and minimising data gaps. -->
+
+<!-- Next, we will define model structure for `crawl`. The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)). -->
+
+<!-- ```{r fit_45_min_crawl_to_argos_tracks, message=FALSE} -->
+<!-- # define priors -->
+<!-- prior <- function(p) { -->
+<!--   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3 -->
+<!--   dnorm(p[2], log(500),  0.2, log = TRUE) +  # 2 -->
+<!--   dnorm(p[3], log(1500), 0.2, log = TRUE) +  # 1 -->
+<!--   dnorm(p[4], log(2500), 0.4, log = TRUE) +  # 0 -->
+<!--   dnorm(p[5], log(2500), 0.4, log = TRUE) +  # A -->
+<!--   dnorm(p[6], log(2500), 0.4, log = TRUE) +  # B -->
+<!--   # skip p[7] as we won't provide a prior for sigma -->
+<!--   dnorm(p[8], -3, 3, log = TRUE)  # beta parameter  -->
+<!-- } -->
+
+<!-- # define error model -->
+<!-- err.model <- list(x = ~ loc_class - 1, y = ~ loc_class - 1) -->
+
+<!-- # define times to predict for easier comparison between ARGOS and GPS tracks -->
+<!-- predTime <- lapply(tracks_argos_ls, function(x) -->
+<!--   seq(first(x$time), last(x$time), "45 min")) -->
+
+<!-- # fit crawl model and predict locations at 45 min time steps -->
+<!-- set.seed(1) -->
+<!-- argos_45_crwOut <- crawlWrap(tracks_argos, -->
+<!--   timeStep = "45 min", -->
+<!--   retryFits = 1, Time.name = "time", -->
+<!--   err.model = err.model, -->
+<!--   prior = prior,  -->
+<!--   predTime = predTime)  -->
+<!-- plot(argos_45_crwOut, ask = FALSE) -->
+<!-- # convert to data.frame and extract predicted locations -->
+<!-- crw_argos_45 <- data.frame(argos_45_crwOut$crwPredict) %>%  -->
+<!--   filter(locType == "p") %>%  -->
+<!--   dplyr::select(mu.x, mu.y, time, ID) %>%  -->
+<!--   dplyr::rename(x = "mu.x", y = "mu.y") %>%  -->
+<!--   {.[-1,]}  # remove first data record as it is not present in the GPS data  -->
+<!-- ``` -->
+
+<!-- <!-- MAM: I get some pretty daming error message here. --> -->
+
+<!-- For comparison, we will also use `crawlWrap` to interpolate GPS data at a 45 min frequency/ -->
+
+<!-- ```{r fit_45_min_crawl_to_gps_tracks, message=FALSE} -->
+<!-- set.seed(1) -->
+<!-- crw_gps_45 <- crawlWrap(obsData = tracks_gps, timeStep = "45 mins",  -->
+<!--                         predTime = predTime) %>%  -->
+<!--   # convert to data.frame and extract predicted locations -->
+<!--   {data.frame(.$crwPredict)} %>%  -->
+<!--   filter(locType == "p") %>%  -->
+<!--   dplyr::select(mu.x, mu.y, time, ID) %>%  -->
+<!--   dplyr::rename(x = "mu.x", y = "mu.y") -->
+
+<!-- # compare estimated tracks -->
+<!-- filter(crw_argos_45, ID=="T172062")  %>%  -->
+<!-- plot(y~x, data=., type = 'l', col = 'red', asp=1)  -->
+<!-- filter(crw_gps_45, ID=="T172062") %>%  -->
+<!-- points(y~x, data=., type = 'l') -->
+<!-- ``` -->
+
+<!-- <!-- MAM: I get some warnings here, that something is going on --> -->
+
+<!-- We see that there is pretty good over lap between the ARGOS (red) and GPS (black) tracks at a 45 min resolution. However, there are some sections where the ARGOS track cuts straight lines through sections where there is variability in the GPS track. -->
+
+<!-- Let's try to fit an HMM to the interpolated ARGOS tracks. -->
+<!-- ```{r prep_ARGOS_tracks_and_fit_basic_HMM, message = FALSE} -->
+<!-- set.seed(1) -->
+<!-- # prep tracks -->
+<!-- prep_argos_45 <- prepData(crw_argos_45, type = "UTM") -->
+<!-- prep_gps_45 <- prepData(crw_gps_45, type = "UTM") -->
+
+<!-- # setup model -->
+<!-- dist <- list(step = "gamma", angle = "vm") -->
+<!-- # Setting up the starting values -->
+<!-- mu0 <- c(1500, 3500) # mu step -->
+<!-- sigma0 <- mu0/2      # Sd step -->
+<!-- kappa0 <- c(1, 4)    # kappa angle -->
+<!-- Par0 <- list(step = c(mu0, sigma0), angle = kappa0) -->
+
+<!-- # Fit a 2 state HMM for 45 min ARGOS and GPS tracks -->
+<!-- HMM_argos_45_basic <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0) -->
+<!-- HMM_gps_45_basic <- fitHMM(prep_gps_45, nbState = 2, dist = dist, Par0 = Par0) -->
+
+<!-- plot(HMM_argos_45_basic, animals = "T172062", ask = F) -->
+<!-- plot(HMM_gps_45_basic, animals = "T172062", ask = F) -->
+<!-- # compare predicted states -->
+<!-- sum(viterbi(HMM_argos_45_basic) == viterbi(HMM_gps_45_basic))/nrow(prep_argos_45) -->
+<!-- ``` -->
+
+<!-- The interpolated GPS track seems to fit, however the model had some issues fitting the ARGOS data. Further, $<50/%$ of the predicted states from the ARGOS model are the same as the GPS model. I suspect the issue may be due to the large gaps where the interpolated track is basically linear. Indeed, in the GPS HMM, state 1 seems to primarily be classifying the straight interpolated sections as state 1 and the rest as state 2. We can try to address this by nullify gaps using the `prepData_NAGaps` function we defined earlier. In this case, we will nullify gaps $>180$ min -->
+
+<!-- ```{r prep_data_and_nullify_gaps} -->
+<!-- # prep 45 min ARGOS data with nullified gaps -->
+<!-- prep_argos_45 <- prepData_NAGaps(track_list = tracks_argos_ls, tracks_crw = crw_argos_45, res = 45, max_gap = 180, type = "UTM") -->
+
+<!-- # prep 45 min gps data with nullified gaps -->
+<!-- prep_gps_45 <- prepData_NAGaps(track_list = tracks_gps_ls, tracks_crw = crw_gps_45, res = 45, max_gap = 180, type = "UTM") -->
+<!-- ``` -->
+
+<!-- Now, let's try to fit the same HMM as above to this data with large gaps nullified.  -->
+
+<!-- ```{r nullified_crawl_HMM_fitHMM_argos, message=FALSE} -->
+<!-- set.seed(1) -->
+<!-- # Fit a 2 state HMM for 45 min ARGOS and GPS tracks -->
+<!-- HMM_argos_45 <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0) -->
+<!-- HMM_gps_45 <- fitHMM(prep_gps_45, nbState = 2, dist = dist, Par0 = Par0) -->
+
+<!-- plot(HMM_argos_45, animals = "T172062", ask = "F") -->
+<!-- plot(HMM_gps_45, animals = "T172062", ask = "F") -->
+<!-- # compare new and original GPS model predicted states -->
+<!-- sum(viterbi(HMM_gps_45_basic) == viterbi(HMM_gps_45))/nrow(prep_argos_45) -->
+<!-- # compare new and original GPS model predicted states -->
+<!-- sum(viterbi(HMM_argos_45) == viterbi(HMM_gps_45))/nrow(prep_argos_45) -->
+<!-- ``` -->
+
+<!-- Both data sets seem to fit easily. There isn't a large change between this GPS model and the previous one (without nullifying large gaps); $91/%$ of the predicted states are the same. However, the overlap between the ARGOS and GPS models is much higher than previously ($71\%$), suggesting the ARGOS model with nullified gaps is significantly improved. However, there is still a notable discrepancy between the ARGOS and the GPS HMMs. -->
+
+<!-- ### Multiple imputation -->
+
+<!-- ```{r fit_multiple_imputations} -->
+
+<!-- # define priors -->
+<!-- prior <- function(p) { -->
+<!--   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3 -->
+<!--   dnorm(p[2], log(500),  0.2, log = TRUE) +  # 2 -->
+<!--   dnorm(p[3], log(1500), 0.2, log = TRUE) +  # 1 -->
+<!--   dnorm(p[4], log(2500), 0.4, log = TRUE) +  # 0 -->
+<!--   dnorm(p[5], log(2500), 0.4, log = TRUE) +  # A -->
+<!--   dnorm(p[6], log(2500), 0.4, log = TRUE) +  # B -->
+<!--   # skip p[7] as we won't provide a prior for sigma -->
+<!--   dnorm(p[8], 4, 2, log = TRUE)  # beta parameter  -->
+<!-- } -->
+
+<!-- # fit crawl model and predict locations at 45 min time steps -->
+<!-- set.seed(1) -->
+<!-- argos_45_crwOut <- crawlWrap(tracks_argos, -->
+<!--   timeStep = "45 min", -->
+<!--   retryFits = 1, Time.name = "time", -->
+<!--   err.model = err.model, -->
+<!--   prior = prior,  -->
+<!--   predTime = predTime)  -->
+
+
+<!-- nfsFits <- MIfitHMM(argos_45_crwOut, nSims = 1, fit = F) -->
+<!-- nfsFits <- MIfitHMM(argos_45_crwOut, nSims = 1, nbStates = 2, dist = dist, Par0 = Par0) -->
+<!-- plot(nfsFits) -->
+<!-- set.seed(1) -->
+
+<!-- track_T172066 <- tracks_argos %>%  -->
+<!--   filter(ID == "T172066") -->
+<!-- argos_45_crwOut_foo1 <- track_T172066 %>%  -->
+<!--   filter(loc_class %in% c("3","2", "0", "A")) %>%  -->
+<!--            crawlWrap(timeStep = "45 min", -->
+<!--   retryFits = 1, Time.name = "time", -->
+<!--   err.model = err.model, -->
+<!--   prior = prior,  -->
+<!--   predTime = predTime$T172066[which(track_T172066$loc_class %in% c("3","2", "0", "A"))])  -->
+
+<!-- nfsFits <- MIfitHMM(argos_45_crwOut_foo1, nSims = 1, fit = F) -->
+
+
+
+<!-- gps_45_crwOut <- crawlWrap(tracks_gps, -->
+<!--   timeStep = "45 min", Time.name = "time", -->
+<!--   predTime = predTime) -->
+<!-- gpsFits <- MIfitHMM(gps_45_crwOut, nSims = 1, fit = F) -->
+<!-- ``` -->
 
