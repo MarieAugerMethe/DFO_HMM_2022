@@ -99,13 +99,13 @@ The remaining packages do not have special dependencies, and should be easily in
 + car
 + mitools
 + doFuture
-+ corrPlot
++ corrplot
 
 ### Check that all packages are installed
 
 Once all the packages are installed, you can check that they are properly installed by loading them.
 
-```{r, warning=FALSE, message=FALSE, error=FALSE, eval=FALSE}
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
 library(sf)
 library(terra)
 library(tmap)
@@ -121,5 +121,5 @@ library(conicfit)
 library(car)
 library(mitools)
 library(doFuture)
-library(corrPlot)
+library(corrplot)
 ```
