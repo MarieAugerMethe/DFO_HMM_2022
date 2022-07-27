@@ -90,7 +90,7 @@ The remaining packages do not have special dependencies, and should be easily in
 + dplyr
 + tidyr
 + lubridate
-+ adhabitatLT
++ adehabitatLT
 + tmap
 + units
 + stringr
@@ -113,7 +113,7 @@ library(momentuHMM)
 library(dplyr)
 library(tidyr)
 library(lubridate)
-library(adhabitatLT)
+library(adehabitatLT)
 library(units)
 library(stringr)
 library(diveMove)
