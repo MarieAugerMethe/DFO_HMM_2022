@@ -105,7 +105,7 @@ The remaining packages do not have special dependencies, and should be easily in
 
 Once all the packages are installed, you can check that they are properly installed by loading them.
 
-```{r, warning=FALSE, message=FALSE, eval=FALSE}
+```{r, warning=FALSE, message=FALSE}
 library(sf)
 library(terra)
 library(tmap)
