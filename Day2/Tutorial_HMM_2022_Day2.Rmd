@@ -643,9 +643,10 @@ HMM_max_dep <- fitHMM(tracks_dives, nbStates = 2, dist = list(max_dep = "gamma")
 HMM_bott_dist <- fitHMM(tracks_dives, nbStates = 2, dist = list(bott_dist = "gamma"), 
                         Par0 = list(bott_dist = c(mu0, sigma0, zm)))
 ```
+
 Next, we can integrate these into one HMM together with step length and turning angle. When we specify the starting parameters, we want to think about how the states may look. For example, we might expect one resident state with slower movement, lower angular concentration, deeper dives, and greater at-depth variability. The second state may be travel, with faster movement, greater angular concentration, shallower dives, and less  at-depth variability.
 
-```{r prep data for dive & move HMM}
+```{r prep_data_for_dive_move_HMM}
 # prep model
 stateNames = c("resident", "travel")
 nbStates = length(stateNames)
@@ -670,24 +671,27 @@ dist = list(step = "gamma", angle = "vm", max_dep = "gamma", bott_dist =  "gamma
 ```
 
 Now, we can fit the HMM with movement and dive variables.
-```{r fit move & dive HMM, message=F}
+```{r fit_move_dive_HMM, message=FALSE, cache=TRUE}
 set.seed(1)
 HMM_move_dive <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 ```
 
 Let's see what it looks like.
-```{r view HMM_move_dive}
+```{r view_HMM_move_dive}
 plot(HMM_move_dive, breaks = 100, ask = F)
 plotPR(HMM_move_dive)
 ```
+
 The tracks look interesting. But there are some issues in the pseudo residuals.
+
 Looking at the QQ plots the model appears to:
 - overestimate the number of fast movement steps
 - underestimating higher turning angles
 - underestimate shallow dives and over estimate deep dives
 - really wonky description of `bott_dist`
 The autocorrelation functions suggest there is remnant autocorrelation in `step` and `max_dep` that are not well described by the model. Together, this information suggests that there may be additional states that are not represented. Let's try to add one more state with an intermediate speed, lower angle concentration, and shallow dives.
-```{r 3-state dive & move HMM, message=FALSE}
+
+```{r 3_state_dive_and_move_HMM, message=FALSE, cache=TRUE}
 # define states
 stateNames <- c("resident", "travel", "search")
 nbStates <- length(stateNames)
@@ -712,12 +716,14 @@ set.seed(1)
 HMM_move_dive_3s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 ```
 
-```{r review 3-state HMM}
+```{r review_3_state_HMM}
 plotPR(HMM_move_dive_3s)
-plot(HMM_move_dive_3s, breaks = 100, ask = F)
+plot(HMM_move_dive_3s, breaks = 100, ask = FALSE)
 ```
+
 Interestingly, the `step` and `angle` QQ-plots were not improved much, though the `step` ACF was improved. However, compared to the 2-state model, there was a drastic improvement in QQ-plot and ACF the `max_dep` data stream and marginal improvement in the `bott_dist` data stream. The newly described state appears to have very low step length, really wide turning angle, minimal diving, and minimal at-depth activity, which may actually be indicative of resting. The "resident" state has intermediate speed and turning angle, but very deep dives and high at-depth activity, suggesting it may represent foraging. Let's try to fit one more 4-state HMM, to try and address the remaining residuals: intermediate speed, lower angle concentration, and more intermediate dives, which may represent searching behaviour.
-```{r 4-state HMM}
+
+```{r 4_state_HMM, cache=TRUE}
 # define states
 stateNames <- c("forage", "travel", "rest", "search")
 nbStates <- length(stateNames)
@@ -736,7 +742,7 @@ nbStates <- length(stateNames)
                   Pars$bott_dist[c(7:9)], Pars$bott_dist[9]) # zm
   Par0 <- list(step = step0, angle = angle0, max_dep = max_dep0, bott_dist = bott_dist0)
 
-# fit 3-state HM
+# fit 4-state HM
 set.seed(1)
 HMM_move_dive_4s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 
@@ -744,272 +750,275 @@ HMM_move_dive_4s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateName
 plotPR(HMM_move_dive_4s)
 plot(HMM_move_dive_4s, breaks = 200)
 ```
+
 The QQ-plot for `step` is quite a bit improved, as is for `bott_dist`. The ACF for `step` is also quite improved. At this point, I'm not sure the model can be significantly improved with the existing data. Although HMMs with different number of states generally shouldn't be compared, since AIC generally favours more states, it is a good sanity check. 
+
+<!-- MAM: maybe reference Pohle for some of these statements -->
 ```{r HMM state AIC}
 AIC(HMM_move_dive, HMM_move_dive_3s, HMM_move_dive_4s)
 ```
 
 
 
-## play
-```{r}
-# plot states
-model <- HMM_max_dep
-dat <- tracks_dives %>% 
-  mutate(max_dep = (max_dep),
-         bott_dist = (bott_dist),
-         state = viterbi(model)) %>% 
-  dplyr::select(max_dep, bott_dist, step, angle, state) 
+<!-- ## play -->
+<!-- ```{r} -->
+<!-- # plot states -->
+<!-- model <- HMM_max_dep -->
+<!-- dat <- tracks_dives %>%  -->
+<!--   mutate(max_dep = (max_dep), -->
+<!--          bott_dist = (bott_dist), -->
+<!--          state = viterbi(model)) %>%  -->
+<!--   dplyr::select(max_dep, bott_dist, step, angle, state)  -->
 
-plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1)
-```
+<!-- plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1) -->
+<!-- ``` -->
 
-One additional option to select which dive data stream to use, is to  and examine which performs better. All of dive data streams are zero-bound, therefore, we can the gamma, log normal, or Weibull distrutions to describe them. For simplicity, we will use the gamma for all, and also divide each data stream by its respective standard deviation to standardise them. 
+<!-- One additional option to select which dive data stream to use, is to  and examine which performs better. All of dive data streams are zero-bound, therefore, we can the gamma, log normal, or Weibull distrutions to describe them. For simplicity, we will use the gamma for all, and also divide each data stream by its respective standard deviation to standardise them.  -->
 
-```{r prep dive data and independent HMMs, message=FALSE}
-# standardise dive variables (not necessary)
-tracks_dives_prep <- tracks_dives %>% 
-  mutate(max_dep = max_dep/sd(max_dep, na.rm = T), 
-         dive_t = dive_t/sd(dive_t, na.rm = T), 
-         mean_dep = mean_dep/sd(mean_dep, na.rm = T), 
-         max_dive_dep = max_dive_dep/sd(max_dive_dep, na.rm = T), 
-         bott_dist = bott_dist/sd(bott_dist, na.rm = T)) 
+<!-- ```{r prep dive data and independent HMMs, message=FALSE} -->
+<!-- # standardise dive variables (not necessary) -->
+<!-- tracks_dives_prep <- tracks_dives %>%  -->
+<!--   mutate(max_dep = max_dep/sd(max_dep, na.rm = T),  -->
+<!--          dive_t = dive_t/sd(dive_t, na.rm = T),  -->
+<!--          mean_dep = mean_dep/sd(mean_dep, na.rm = T),  -->
+<!--          max_dive_dep = max_dive_dep/sd(max_dive_dep, na.rm = T),  -->
+<!--          bott_dist = bott_dist/sd(bott_dist, na.rm = T))  -->
 
-# identify whether there is 0 data
-tracks_dives %>% 
-  summarise(max_dep = sum(max_dep==0, na.rm = T), 
-            dive_t = sum(dive_t==0, na.rm = T), 
-            mean_dep = sum(mean_dep==0, na.rm = T), 
-            max_dive_dep = sum(max_dive_dep==0, na.rm = T), 
-            bott_dist = sum(bott_dist==0, na.rm = T)) 
-# therefore, we need to include zero-mass parameters for dive_t and bott_dist
+<!-- # identify whether there is 0 data -->
+<!-- tracks_dives %>%  -->
+<!--   summarise(max_dep = sum(max_dep==0, na.rm = T),  -->
+<!--             dive_t = sum(dive_t==0, na.rm = T),  -->
+<!--             mean_dep = sum(mean_dep==0, na.rm = T),  -->
+<!--             max_dive_dep = sum(max_dive_dep==0, na.rm = T),  -->
+<!--             bott_dist = sum(bott_dist==0, na.rm = T))  -->
+<!-- # therefore, we need to include zero-mass parameters for dive_t and bott_dist -->
 
-# fit dive-only HMMs
-set.seed(1)
-HMM_max_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dep="gamma"), 
-                      Par0 = list(max_dep = c(mu0, sigma0)))
-HMM_dive_t <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(dive_t="gamma"), 
-                     Par0 = list(dive_t = c(mu0, sigma0, zm)))
-HMM_mean_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(mean_dep="gamma"), 
-                       Par0 = list(mean_dep = c(mu0, sigma0)))
-HMM_max_dive_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dive_dep="gamma"),
-                           Par0 = list(max_dive_dep = c(mu0, sigma0)))
-HMM_bott_dist <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(bott_dist="gamma"), 
-                        Par0 = list(bott_dist = c(mu0, sigma0, zm)))
-```
-Now, to compare the models, we cannot use standard metrics of AIC, likelihood, or r$^2$ since the response data (the dive variables) are all different. However, we can look at metrics of 
-```{r compare dive-only HMMs, message=FALSE}
-plotPR(HMM_max_dep)
-plotPR(HMM_dive_t)
-plotPR(HMM_mean_dep)
-plotPR(HMM_max_dive_dep)
-plotPR(HMM_bott_dist)
+<!-- # fit dive-only HMMs -->
+<!-- set.seed(1) -->
+<!-- HMM_max_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dep="gamma"),  -->
+<!--                       Par0 = list(max_dep = c(mu0, sigma0))) -->
+<!-- HMM_dive_t <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(dive_t="gamma"),  -->
+<!--                      Par0 = list(dive_t = c(mu0, sigma0, zm))) -->
+<!-- HMM_mean_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(mean_dep="gamma"),  -->
+<!--                        Par0 = list(mean_dep = c(mu0, sigma0))) -->
+<!-- HMM_max_dive_dep <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(max_dive_dep="gamma"), -->
+<!--                            Par0 = list(max_dive_dep = c(mu0, sigma0))) -->
+<!-- HMM_bott_dist <- fitHMM(tracks_dives_prep, nbStates=2, dist=list(bott_dist="gamma"),  -->
+<!--                         Par0 = list(bott_dist = c(mu0, sigma0, zm))) -->
+<!-- ``` -->
+<!-- Now, to compare the models, we cannot use standard metrics of AIC, likelihood, or r$^2$ since the response data (the dive variables) are all different. However, we can look at metrics of  -->
+<!-- ```{r compare dive-only HMMs, message=FALSE} -->
+<!-- plotPR(HMM_max_dep) -->
+<!-- plotPR(HMM_dive_t) -->
+<!-- plotPR(HMM_mean_dep) -->
+<!-- plotPR(HMM_max_dive_dep) -->
+<!-- plotPR(HMM_bott_dist) -->
 
-plot(HMM_max_dep, ask = F)
-plot(HMM_dive_t, ask = F)
-plot(HMM_mean_dep, ask = T)
-plot(HMM_max_dive_dep, ask = T)
-plot(HMM_bott_dist, ask = F)
-plot(HMM_gps_crw_NAgaps, ask = F)
+<!-- plot(HMM_max_dep, ask = F) -->
+<!-- plot(HMM_dive_t, ask = F) -->
+<!-- plot(HMM_mean_dep, ask = T) -->
+<!-- plot(HMM_max_dive_dep, ask = T) -->
+<!-- plot(HMM_bott_dist, ask = F) -->
+<!-- plot(HMM_gps_crw_NAgaps, ask = F) -->
 
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = mean_dep)) + 
-  geom_point() + theme_classic()  # 1
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = max_dep)) + 
-  geom_point() + theme_classic()  # 1
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = dive_t)) + 
-  geom_point() + theme_classic() #  1
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = max_dive_dep)) + 
-  geom_point() + theme_classic() # 
-filter(tracks_dives_prep, ID == "T172062") %>% 
-  ggplot(aes(x = x, y = y, col = bott_dist)) + 
-  geom_point() + theme_classic() # 
-
-
-AIC(HMM_max_dep, HMM_dive_t, HMM_mean_dep, HMM_max_dive_dep, HMM_bott_dist)
-
-f <- which(!is.na(prep_tracks_gps_crw_NAgaps$step))
-states_sa <- viterbi(HMM_gps_crw_NAgaps)[f]
-
-data.frame(max_dep = sum(viterbi(HMM_max_dep)[f]==states_sa),
-           dive_t = sum(viterbi(HMM_dive_t)[f]==states_sa),
-           mean_dep = sum(viterbi(HMM_mean_dep)[f]==states_sa),
-           max_dive_dep = sum(viterbi(HMM_max_dive_dep)[f]==states_sa),
-           bott_dist = sum(viterbi(HMM_bott_dist)[f]==states_sa))
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = mean_dep)) +  -->
+<!--   geom_point() + theme_classic()  # 1 -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = max_dep)) +  -->
+<!--   geom_point() + theme_classic()  # 1 -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = dive_t)) +  -->
+<!--   geom_point() + theme_classic() #  1 -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = max_dive_dep)) +  -->
+<!--   geom_point() + theme_classic() #  -->
+<!-- filter(tracks_dives_prep, ID == "T172062") %>%  -->
+<!--   ggplot(aes(x = x, y = y, col = bott_dist)) +  -->
+<!--   geom_point() + theme_classic() #  -->
 
 
-library(psych)
+<!-- AIC(HMM_max_dep, HMM_dive_t, HMM_mean_dep, HMM_max_dive_dep, HMM_bott_dist) -->
 
-pairs.panels(tracks_dives_prep[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", 
-             "bott_dist", "step", "angle")],
-             gap = 0,
-             pch=21)
+<!-- f <- which(!is.na(prep_tracks_gps_crw_NAgaps$step)) -->
+<!-- states_sa <- viterbi(HMM_gps_crw_NAgaps)[f] -->
 
-pairs.panels(cbind(tracks_dives_prep[,c("max_dep", "bott_dist", "step")],
-                   abs(tracks_dives_prep[,c("angle")])),
-             gap = 0,
-             pch=20)
-# plot states
-dat <- tracks_dives_prep %>% 
-  mutate(max_dep = log(max_dep),
-         bott_dist = log(bott_dist),
-         state = viterbi(HMM_move_dive_3s)) %>% 
-  dplyr::select(max_dep, bott_dist, step, angle, state) 
-ggplot(dat, aes(x = step, y = angle, col = state)) + 
-  geom_point(shape = 20)
-ggplot(dat, aes(x = step, y = max_dep, col = state)) + 
-  geom_point(shape = 20)
-library(plotly)
-plot_ly(dat, x = ~log(step), y = ~abs(angle), z = ~-max_dep, color = ~factor(state), size = 1)
-plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,  size = 1)
-plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1)
-plot_ly(dat, x = ~log(step), y = ~bott_dist, z = ~-max_dep,color = ~factor(state),  size = 1)
-
-plot_ly(dat, x = ~step, y = ~max_dep, z = ~bott_dist, size = 1)
-plot_ly(dat, x = ~abs(angle), y = ~max_dep, z = ~bott_dist, size = 1)
-
-# PCA
-dat <- tracks_dives_prep %>% 
-  mutate(max_dep = log(max_dep),
-         bott_dist = log(bott_dist),
-         state = viterbi(HMM_move_dive_3s)) %>% 
-  dplyr::select(max_dep, bott_dist, step, angle) %>% 
-  na.omit() %>% 
-  {.[!is.infinite(rowSums(.)),]}
-
-pairs.panels(dat,
-             
-             gap = 0,
-             pch=20)
-pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "bott_dist", "step", "angle")])),
-                         c("max_dep", "bott_dist", "step", "angle")]),
-             center = TRUE,
-            scale. = TRUE)
-print(pc)
-ggplot(dat, aes(x = step, y = angle, col = state)) + 
-  geom_point()
-# PCA
-dat <- tracks_dives_prep %>% 
-  mutate(mean_dep = log(mean_dep),
-         max_dep = log(max_dep),
-         dive_t = log(dive_t),
-         bott_t = log(bott_t),
-         prop_bott = logit(prop_bott),
-         max_dive_dep = log(max_dive_dep),
-         bott_dist = log(bott_dist),
-         post_dive_dur = log(post_dive_dur),
-         state = viterbi(HMM_gps_crw_NAgaps)) %>% 
-  dplyr::select(max_dep, dive_t, mean_dep, max_dive_dep, bott_dist, step, angle) %>% 
-  na.omit() %>% 
-  {.[!is.infinite(rowSums(.)),]}
-
-pairs.panels(dat,
-             gap = 0,
-             pch=21)
-dat %>% 
-cor() %>% 
-  corrplot(method="number")
-
-tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", 
-             "bott_dist", "step", "angle")] %>% 
-  na.omit() %>% {.[!is.infinite(rowSums(.)),]} %>% nrow()
-
-pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])),
-                         c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")]),
-             center = TRUE,
-            scale. = TRUE)
-attributes(pc)
-print(pc)
-library(factoextra)
-fviz_eig(pc)
-groups <- as.factor(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])),])[,"state"])
-fviz_pca_ind(pc,
-             col.ind = groups, # color by groups
-             palette = c("#00AFBB",  "#FC4E07"),
-             addEllipses = TRUE, # Concentration ellipses
-             ellipse.type = "confidence",
-             legend.title = "Groups",
-             repel = TRUE
-             )
-
-library(ggfortify)
-df <- iris[1:4]
-pca_res <- prcomp(df, scale. = TRUE)
-
-autoplot(pca_res)
-```
+<!-- data.frame(max_dep = sum(viterbi(HMM_max_dep)[f]==states_sa), -->
+<!--            dive_t = sum(viterbi(HMM_dive_t)[f]==states_sa), -->
+<!--            mean_dep = sum(viterbi(HMM_mean_dep)[f]==states_sa), -->
+<!--            max_dive_dep = sum(viterbi(HMM_max_dive_dep)[f]==states_sa), -->
+<!--            bott_dist = sum(viterbi(HMM_bott_dist)[f]==states_sa)) -->
 
 
+<!-- library(psych) -->
+
+<!-- pairs.panels(tracks_dives_prep[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",  -->
+<!--              "bott_dist", "step", "angle")], -->
+<!--              gap = 0, -->
+<!--              pch=21) -->
+
+<!-- pairs.panels(cbind(tracks_dives_prep[,c("max_dep", "bott_dist", "step")], -->
+<!--                    abs(tracks_dives_prep[,c("angle")])), -->
+<!--              gap = 0, -->
+<!--              pch=20) -->
+<!-- # plot states -->
+<!-- dat <- tracks_dives_prep %>%  -->
+<!--   mutate(max_dep = log(max_dep), -->
+<!--          bott_dist = log(bott_dist), -->
+<!--          state = viterbi(HMM_move_dive_3s)) %>%  -->
+<!--   dplyr::select(max_dep, bott_dist, step, angle, state)  -->
+<!-- ggplot(dat, aes(x = step, y = angle, col = state)) +  -->
+<!--   geom_point(shape = 20) -->
+<!-- ggplot(dat, aes(x = step, y = max_dep, col = state)) +  -->
+<!--   geom_point(shape = 20) -->
+<!-- library(plotly) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~abs(angle), z = ~-max_dep, color = ~factor(state), size = 1) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,  size = 1) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~sqrt(abs(angle)), z = ~-max_dep,color = ~factor(state),  size = 1) -->
+<!-- plot_ly(dat, x = ~log(step), y = ~bott_dist, z = ~-max_dep,color = ~factor(state),  size = 1) -->
+
+<!-- plot_ly(dat, x = ~step, y = ~max_dep, z = ~bott_dist, size = 1) -->
+<!-- plot_ly(dat, x = ~abs(angle), y = ~max_dep, z = ~bott_dist, size = 1) -->
+
+<!-- # PCA -->
+<!-- dat <- tracks_dives_prep %>%  -->
+<!--   mutate(max_dep = log(max_dep), -->
+<!--          bott_dist = log(bott_dist), -->
+<!--          state = viterbi(HMM_move_dive_3s)) %>%  -->
+<!--   dplyr::select(max_dep, bott_dist, step, angle) %>%  -->
+<!--   na.omit() %>%  -->
+<!--   {.[!is.infinite(rowSums(.)),]} -->
+
+<!-- pairs.panels(dat, -->
+
+<!--              gap = 0, -->
+<!--              pch=20) -->
+<!-- pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "bott_dist", "step", "angle")])), -->
+<!--                          c("max_dep", "bott_dist", "step", "angle")]), -->
+<!--              center = TRUE, -->
+<!--             scale. = TRUE) -->
+<!-- print(pc) -->
+<!-- ggplot(dat, aes(x = step, y = angle, col = state)) +  -->
+<!--   geom_point() -->
+<!-- # PCA -->
+<!-- dat <- tracks_dives_prep %>%  -->
+<!--   mutate(mean_dep = log(mean_dep), -->
+<!--          max_dep = log(max_dep), -->
+<!--          dive_t = log(dive_t), -->
+<!--          bott_t = log(bott_t), -->
+<!--          prop_bott = logit(prop_bott), -->
+<!--          max_dive_dep = log(max_dive_dep), -->
+<!--          bott_dist = log(bott_dist), -->
+<!--          post_dive_dur = log(post_dive_dur), -->
+<!--          state = viterbi(HMM_gps_crw_NAgaps)) %>%  -->
+<!--   dplyr::select(max_dep, dive_t, mean_dep, max_dive_dep, bott_dist, step, angle) %>%  -->
+<!--   na.omit() %>%  -->
+<!--   {.[!is.infinite(rowSums(.)),]} -->
+
+<!-- pairs.panels(dat, -->
+<!--              gap = 0, -->
+<!--              pch=21) -->
+<!-- dat %>%  -->
+<!-- cor() %>%  -->
+<!--   corrplot(method="number") -->
+
+<!-- tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",  -->
+<!--              "bott_dist", "step", "angle")] %>%  -->
+<!--   na.omit() %>% {.[!is.infinite(rowSums(.)),]} %>% nrow() -->
+
+<!-- pc <- prcomp(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])), -->
+<!--                          c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")]), -->
+<!--              center = TRUE, -->
+<!--             scale. = TRUE) -->
+<!-- attributes(pc) -->
+<!-- print(pc) -->
+<!-- library(factoextra) -->
+<!-- fviz_eig(pc) -->
+<!-- groups <- as.factor(na.omit(dat[!is.infinite(rowSums(dat[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", "bott_dist", "step", "angle")])),])[,"state"]) -->
+<!-- fviz_pca_ind(pc, -->
+<!--              col.ind = groups, # color by groups -->
+<!--              palette = c("#00AFBB",  "#FC4E07"), -->
+<!--              addEllipses = TRUE, # Concentration ellipses -->
+<!--              ellipse.type = "confidence", -->
+<!--              legend.title = "Groups", -->
+<!--              repel = TRUE -->
+<!--              ) -->
+
+<!-- library(ggfortify) -->
+<!-- df <- iris[1:4] -->
+<!-- pca_res <- prcomp(df, scale. = TRUE) -->
+
+<!-- autoplot(pca_res) -->
+<!-- ``` -->
 
 
 
 
 
 
-```{r calibrate_TDR_extra, warning=FALSE}
-i = 0
-plot(dives$depth*-1, pch = 19, type = 'l', xlim = c(1,8)+8*i, ylim = c(-100,0)); i = i+1
-i = 0
-plot(dives$dt, pch = 19, xlim = c(1,100)+100*i); i = i+1
-# regularise dive
-hist(dives$depth,2000, xlim = c(0,200))
+
+
+<!-- ```{r calibrate_TDR_extra, warning=FALSE} -->
+<!-- i = 0 -->
+<!-- plot(dives$depth*-1, pch = 19, type = 'l', xlim = c(1,8)+8*i, ylim = c(-100,0)); i = i+1 -->
+<!-- i = 0 -->
+<!-- plot(dives$dt, pch = 19, xlim = c(1,100)+100*i); i = i+1 -->
+<!-- # regularise dive -->
+<!-- hist(dives$depth,2000, xlim = c(0,200)) -->
 
 
 
 
-# round time to nearest 10 min
-# summarise 
-## max depth
-## mean depth
-## 3rd quantile of depth 
-## number of dives
-## number small vs short dives 
-## time at depth
-## percent to bottom
-## depth variance
-## dive type (which dive is most )
-# method of summary strongly depends on resolution of HMM. in some cases, individual dives can last longer than the HMM step, and depending on when within the 10 min step a dive starts, we may capture the entirety or just a portion of the dive (e.g., ascent, and descent). Conversely, with lower time locations, we may have a number of dives in each step that must be summarised (e.g., number of dives)
+<!-- # round time to nearest 10 min -->
+<!-- # summarise  -->
+<!-- ## max depth -->
+<!-- ## mean depth -->
+<!-- ## 3rd quantile of depth  -->
+<!-- ## number of dives -->
+<!-- ## number small vs short dives  -->
+<!-- ## time at depth -->
+<!-- ## percent to bottom -->
+<!-- ## depth variance -->
+<!-- ## dive type (which dive is most ) -->
+<!-- # method of summary strongly depends on resolution of HMM. in some cases, individual dives can last longer than the HMM step, and depending on when within the 10 min step a dive starts, we may capture the entirety or just a portion of the dive (e.g., ascent, and descent). Conversely, with lower time locations, we may have a number of dives in each step that must be summarised (e.g., number of dives) -->
 
-library(terra)
-bath <- rast("data/gebco_2022_n74.0_s71.5_w-82.0_e-77.0.tif") %>% 
-  crop(ext(-82, -76, 72, 73))
-
-
+<!-- library(terra) -->
+<!-- bath <- rast("data/gebco_2022_n74.0_s71.5_w-82.0_e-77.0.tif") %>%  -->
+<!--   crop(ext(-82, -76, 72, 73)) -->
 
 
 
-```
 
-```{r plot all tracks}
-# convert to lines and plot using tmap
-tracks %>% group_by(ID) %>% 
-  summarise(do_union = F) %>% 
-  st_cast("LINESTRING") %>% 
-     tm_shape() +
-   tm_lines(col = "ID", palette = "Dark2")
 
-```
+<!-- ``` -->
 
-```{r}
-# first passage time
-tracks_high <- filter(tracks, loc_class %in% c("GPS", 3, 2, 1))
-ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks_high)[,"X"],
-                             st_coordinates(tracks_high)[,"Y"]),
-                  date = tracks_high$time, id=factor(tracks_high$ID))
-fpt_low <- fpt(ltraj, seq(100, 3000, length=100), units = "hours") %>% 
-  varlogfpt() 
-fpt_med <- fpt(ltraj, seq(3000, 20000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>% 
-  varlogfpt()
-fpt(ltraj, 1500, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-fpt(ltraj, 15000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-fpt(ltraj, 40000, units = "hours") %>% unlist %>% mean(na.rm = T)/40
-# looks like there are are increases/plateaus of variance at around 1.5, 15, 40, & 80 km
-```
+<!-- ```{r plot all tracks} -->
+<!-- # convert to lines and plot using tmap -->
+<!-- tracks %>% group_by(ID) %>%  -->
+<!--   summarise(do_union = F) %>%  -->
+<!--   st_cast("LINESTRING") %>%  -->
+<!--      tm_shape() + -->
+<!--    tm_lines(col = "ID", palette = "Dark2") -->
+
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- # first passage time -->
+<!-- tracks_high <- filter(tracks, loc_class %in% c("GPS", 3, 2, 1)) -->
+<!-- ltraj <- as.ltraj(xy = cbind(st_coordinates(tracks_high)[,"X"], -->
+<!--                              st_coordinates(tracks_high)[,"Y"]), -->
+<!--                   date = tracks_high$time, id=factor(tracks_high$ID)) -->
+<!-- fpt_low <- fpt(ltraj, seq(100, 3000, length=100), units = "hours") %>%  -->
+<!--   varlogfpt()  -->
+<!-- fpt_med <- fpt(ltraj, seq(3000, 20000, length=200), units = "hours") %>%  -->
+<!--   varlogfpt() -->
+<!-- fpt_hig <- fpt(ltraj, seq(20000, 100000, length=200), units = "hours") %>%  -->
+<!--   varlogfpt() -->
+<!-- fpt(ltraj, 1500, units = "hours") %>% unlist %>% mean(na.rm = T)/40 -->
+<!-- fpt(ltraj, 15000, units = "hours") %>% unlist %>% mean(na.rm = T)/40 -->
+<!-- fpt(ltraj, 40000, units = "hours") %>% unlist %>% mean(na.rm = T)/40 -->
+<!-- # looks like there are are increases/plateaus of variance at around 1.5, 15, 40, & 80 km -->
+<!-- ``` -->
 
 
 <!-- Argos data section - for now removed. We could do an extra tutorial. -->
