@@ -55,6 +55,7 @@ setwd("Day2")
 # Import data and initial data processing
 
 <!-- MAM: If you only use the August data throughout, create a file that has just the August data.  -->
+<!-- MAM: if we go ahead and drop the Argos data, also remove the Argos data all together from this file, and just present teh GPS data. The less steps we have the more they will learn the real stuff. -->
 <!-- MAM: also here explain the different data manipulation steps (e.g., NA, location class).  -->
 <!-- That's actually quite important in this tutorial about messy data. -->
 
@@ -289,6 +290,8 @@ crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
 # plot fit tracks
 plot(crw_gps_10, ask = FALSE)
 ```
+
+<!-- MAM: I'm getting warning messages here. I wonder if it's because I removed the adding 10 sec (which I assumed was more for Argos data. If you add back the adding 10 sec, consider adding just 1 sec, and explain it well. -->
 
 Notice how the predicted tracks do not make perfectly straight lines through missing sections (particularly noticeable in T172062). Next, we will extract the predicted locations and add them to the observed data.
 
