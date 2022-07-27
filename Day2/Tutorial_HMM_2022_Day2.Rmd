@@ -520,7 +520,7 @@ In this section, we will use 45 min as a trade-off between higher resolution and
 
 Next, we will define model structure for `crawl`. The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)).
 
-```{r fit_45_min_crawl_to_argos_and_gps_tracks,  message=FALSE}
+```{r fit_45_min_crawl_to_argos_tracks, message=FALSE}
 # define priors
 prior <- function(p) {
   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
@@ -548,15 +548,20 @@ argos_45_crwOut <- crawlWrap(tracks_argos,
   err.model = err.model,
   prior = prior, 
   predTime = predTime) 
-plot(crw_argos_45, ask = FALSE)
+plot(argos_45_crwOut, ask = FALSE)
 # convert to data.frame and extract predicted locations
 crw_argos_45 <- data.frame(argos_45_crwOut$crwPredict) %>% 
   filter(locType == "p") %>% 
   dplyr::select(mu.x, mu.y, time, ID) %>% 
   dplyr::rename(x = "mu.x", y = "mu.y") %>% 
   {.[-1,]}  # remove first data record as it is not present in the GPS data 
+```
 
-# for comparison, we will also interpolate the GPS data to 45 min
+<!-- MAM: I get some pretty daming error message here. -->
+
+For comparison, we will also use `crawlWrap` to interpolate GPS data at a 45 min frequency/
+
+```{r fit_45_min_crawl_to_gps_tracks, message=FALSE}
 set.seed(1)
 crw_gps_45 <- crawlWrap(obsData = tracks_gps, timeStep = "45 mins", 
                         predTime = predTime) %>% 
@@ -573,7 +578,7 @@ filter(crw_gps_45, ID=="T172062") %>%
 points(y~x, data=., type = 'l')
 ```
 
-<!-- MAM: I get some pretty daming error message here. -->
+<!-- MAM: I get some warnings here, that something is going on -->
 
 We see that there is pretty good over lap between the ARGOS (red) and GPS (black) tracks at a 45 min resolution. However, there are some sections where the ARGOS track cuts straight lines through sections where there is variability in the GPS track.
 
