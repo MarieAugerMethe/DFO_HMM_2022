@@ -2,9 +2,10 @@
 title: "Hidden Markov Models: Basics for animal movement data"
 author: "Marie Auger-Méthé"
 output:
-  pdf_document: 
-    number_sections: true
   html_document:
+    number_sections: true
+    highlight: tango
+  pdf_document: 
     number_sections: true
 editor_options:
   chunk_output_type: console
@@ -32,7 +33,7 @@ paper:
 First, let's load the packages that we will need to complete the
 analyses. Off course you need to have them installed first.
 
-```{r Load packages, echo=TRUE, message=FALSE}
+```{r Load packages, echo=TRUE, message=FALSE, attr.source = ".numberLines"}
 library(momentuHMM) # Package for fitting HMMs, builds on moveHMM
 library(sp) # For GIS tasks (e.g., geographic transformations)
 library(raster) # For raster spatial covariates
@@ -58,7 +59,7 @@ information.
 
 Let's read the data file and peak at it.
 
-```{r Load data, warning=FALSE}
+```{r Load data, warning=FALSE, attr.source = ".numberLines"}
 # Make sure you are in the good directory!
 seal <- read.csv("data/seals.csv", stringsAsFactors = FALSE)
 # Look at the data
@@ -249,7 +250,7 @@ kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
 
 Ok, were are ready. Let's fit the HMM
 
-```{r message=FALSE}
+```{r message=FALSE, cache=TRUE}
 # Fit a 2 state HMM
 sealHMM2s <- fitHMM(sealPrep, nbState = 2, dist = list(step = "gamma",
 angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0), formula = ~ 1)
@@ -285,7 +286,7 @@ state 2), something we call state decoding. To do so, we can use the
 function `viterbi`, which uses the Viterbi algorithm to produce the most
 likely sequence of states according to your fitted model and data.
 
-```{r}
+```{r, cache=TRUE}
 # Apply the Viterbi algorithm using your fited model object
 sealStates <- viterbi(sealHMM2s)
 # Let's look at predicted states of the first 20 time steps
@@ -337,7 +338,7 @@ affect the estimating procedures. So it's always good to check if you
 get similar results with different starting values. Here, we will make
 the starting values of the two behavioural states closer to one another.
 
-```{r message=FALSE}
+```{r message=FALSE, cache=TRUE}
 # Setting up the starting values (more similar values)
 mu02 <- c(5, 7) # Mean step length
 sigma02 <- c(5, 7) # Sd of the step length
@@ -376,7 +377,7 @@ perturbation by setting the argument `retrySD`).
 
 Let's try (this will take a few minutes).
 
-```{r message=FALSE}
+```{r message=FALSE, cache=TRUE}
 # Fit the same 2-state HMM with retryFits
 # This is a random pertubation, so setting the seed to get the same results
 set.seed(1234)
@@ -406,7 +407,7 @@ Still looking very similar!
 But let's choose some wild starting values to see the type of problems
 we might run into.
 
-```{r message=FALSE}
+```{r message=FALSE, cache=TRUE}
 # Setting wild starting values
 mu0W <- c(5, 100) # Mean step length
 sigma0W <- c(5, 0.1) # Sd of the step length
@@ -474,7 +475,7 @@ accounting for the persistence in the underlying behavioural states.
 This could indicate that there is more hidden behavioural states. Let's
 try a 3-state HMMs.
 
-```{r message=FALSE}
+```{r message=FALSE, cache=TRUE}
 # Setting up the starting values (we need 3 now, because 3 states)
 mu03s <- c(0.1, 3, 7) # Mean step length
 sigma03s <- c(0.1, 3, 7) # Sd of the step length
