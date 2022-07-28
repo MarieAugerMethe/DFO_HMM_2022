@@ -11,6 +11,13 @@ editor_options:
   chunk_output_type: console
 ---
 
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -84,7 +91,7 @@ assumption. Note that this kind of interpolation may not be adequate in
 many circumstances and see activities to investigate the effects of the
 choice of the time interval on the analysis.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # First, let's transform the date/time info into a
 # proper time format
 seal$date <- as.POSIXct(seal$date, format = "%Y-%m-%d %H:%M:%S",
@@ -138,7 +145,7 @@ think about are:
 -   `"coordNames"`: the names of the columns with the coordinates. So in
     our case `lon` and `lat`.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Preparing the data: here mainly calculating step
 # lengths and turning angles
 sealPrep <- prepData(sealreg, type = "LL", coordNames = c("lon",
@@ -159,7 +166,7 @@ the object it returns is from a specific S3 class defined in the
 `momentuHMM` package. This means that we can apply generic functions
 like `plot` to it and it will return specified outputs.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plot(sealPrep)
 ```
 
@@ -193,7 +200,7 @@ lengths that are exactly zero in your data set, you need to use
 zero-inflated distributions. But in this case, we have no zeros. Let's
 check
 
-```{r}
+```{r, attr.source = ".numberLines"}
 sum(sealPrep$step == 0, na.rm = TRUE)
 ```
 
@@ -223,7 +230,7 @@ looks like the animal has step lengths that are close to 0, 3, 7. As I
 see it, there are probably three behaviours with different mean step
 lengths around these values.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plot(sealPrep$step ~
 sealPrep$date, ty = "l", ylab = "Step length",
 xlab = "Date", las = 1)
@@ -241,7 +248,7 @@ turning angle distribution is almost uniform (the animal turns in all
 directions). Note that $\kappa$ cannot be exactly 0, so let's choose 0.1
 and 1.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Setting up the starting values
 mu0 <- c(3, 7) # Mean step length
 sigma0 <- c(3, 7) # Sd of the step length
@@ -250,7 +257,7 @@ kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
 
 Ok, were are ready. Let's fit the HMM
 
-```{r message=FALSE, cache=TRUE}
+```{r message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # Fit a 2 state HMM
 sealHMM2s <- fitHMM(sealPrep, nbState = 2, dist = list(step = "gamma",
 angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0), formula = ~ 1)
@@ -258,7 +265,7 @@ angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0), formula = ~ 1
 
 Let's explore the results.
 
-```{r }
+```{r, attr.source = ".numberLines"}
 # Let's look at parameter estimates
 sealHMM2s
 # Let's plot it
@@ -286,7 +293,7 @@ state 2), something we call state decoding. To do so, we can use the
 function `viterbi`, which uses the Viterbi algorithm to produce the most
 likely sequence of states according to your fitted model and data.
 
-```{r, cache=TRUE}
+```{r, cache=TRUE, attr.source = ".numberLines"}
 # Apply the Viterbi algorithm using your fited model object
 sealStates <- viterbi(sealHMM2s)
 # Let's look at predicted states of the first 20 time steps
@@ -302,7 +309,7 @@ each state rather than the most likely state. To do so, you can use the
 function `stateProbs`, which returns a matrix of the probability of
 being in each state for each time step.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Calculate the probability of being in each state
 sealProbs <- stateProbs(sealHMM2s)
 # Let's look at the state probability matrix
@@ -319,7 +326,7 @@ and turning angle distributions fit best).
 You can plot the results from both of these functions using the function
 `plotState`
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plotStates(sealHMM2s)
 ```
 
@@ -338,7 +345,7 @@ affect the estimating procedures. So it's always good to check if you
 get similar results with different starting values. Here, we will make
 the starting values of the two behavioural states closer to one another.
 
-```{r message=FALSE, cache=TRUE}
+```{r message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # Setting up the starting values (more similar values)
 mu02 <- c(5, 7) # Mean step length
 sigma02 <- c(5, 7) # Sd of the step length
@@ -357,7 +364,7 @@ the lowest negative log likelihood (equivalent of highest log
 likelihood, so closer to the real MLE). Let's look also at the parameter
 estimates they each returned.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Negative log likelihood
 c(original = sealHMM2s$mod$minimum, new = sealHMM2s2$mod$minimum)
 
@@ -377,7 +384,7 @@ perturbation by setting the argument `retrySD`).
 
 Let's try (this will take a few minutes).
 
-```{r message=FALSE, cache=TRUE}
+```{r message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # Fit the same 2-state HMM with retryFits
 # This is a random pertubation, so setting the seed to get the same results
 set.seed(1234)
@@ -390,7 +397,7 @@ sealHMM2sRF <- fitHMM(sealPrep,
 
 Let's compare the results again.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Negative log likelihood
 c(original = sealHMM2s$mod$minimum, new = sealHMM2s2$mod$minimum,
   retryFits = sealHMM2sRF$mod$minimum)
@@ -407,7 +414,7 @@ Still looking very similar!
 But let's choose some wild starting values to see the type of problems
 we might run into.
 
-```{r message=FALSE, cache=TRUE}
+```{r message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # Setting wild starting values
 mu0W <- c(5, 100) # Mean step length
 sigma0W <- c(5, 0.1) # Sd of the step length
@@ -421,7 +428,7 @@ sealHMM2sW <- fitHMM(sealPrep, nbState = 2,
 Let's compare the negative log likelihood (note that we want the minimum
 value here to get the MLE) and parameter estimates.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Negative log likelihood
 c(original = sealHMM2s$mod$minimum, wild=sealHMM2sW$mod$minimum)
 
@@ -463,7 +470,7 @@ standard normal distribution. You can look at pseudo-residuals directly
 via the function `plotPR`, which plots the pseudo-residual times-series,
 the qq-plots, and the autocorrelation functions (ACF).
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plotPR(sealHMM2s)
 ```
 
@@ -475,7 +482,7 @@ accounting for the persistence in the underlying behavioural states.
 This could indicate that there is more hidden behavioural states. Let's
 try a 3-state HMMs.
 
-```{r message=FALSE, cache=TRUE}
+```{r message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # Setting up the starting values (we need 3 now, because 3 states)
 mu03s <- c(0.1, 3, 7) # Mean step length
 sigma03s <- c(0.1, 3, 7) # Sd of the step length
@@ -490,7 +497,7 @@ sealHMM3s <- fitHMM(sealPrep,
 
 Let's look at it and at the pseudo-residuals.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plot(sealHMM3s)
 plotStates(sealHMM3s)
 plotPR(sealHMM3s)
@@ -522,7 +529,7 @@ One way fitting the model to the simulated data may be useful is in
 identifying whether you have enough data to estimate your parameters
 accurately.
 
-```{r message=FALSE}
+```{r message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # Simulate the model
 sealSim <- simData(model=sealHMM3s, nbAnimals =1, states = TRUE)
 # Fit the model to the simulated data
@@ -533,7 +540,7 @@ sealSimFit <- fitHMM(sealSim,
 
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Plot the results
 plot(sealSimFit)
 # Compared the parameter estimates
@@ -556,7 +563,7 @@ we can use the function `CIreal`.
 
 For example, let's look the step length mean parameters.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Caculate the CIs
 sealCI <- CIreal(sealHMM3s)
 # Let's look at the step lenth CIs
@@ -586,7 +593,7 @@ need the function `raster` from the package with the same name.
 
 Let's read the file and plot it.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Read the raster
 bathy <- raster("data/bathy.grd")
 # Let's plot the bathymethy raster
@@ -601,7 +608,7 @@ values at the seal locations. Off course for this to work the spatial
 covariate raster needs to be in the same projection as the movement
 data. It's the case here.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 sealPrep <- prepData(sealreg, type="LL", coordNames = c("lon", "lat"),
                      spatialCovs = list(bathy=bathy))
 head(sealPrep)
@@ -640,7 +647,7 @@ parameters (might be worth looking if it makes indeed a difference).
 Note that to be able to use `getPar0` in this case, we have to refit the
 simpler model with the new data that has the bathymetry data.
 
-```{r message=FALSE}
+```{r message=FALSE, attr.source = ".numberLines"}
 # New formula
 bathyForm <- ~bathy
 
@@ -654,12 +661,12 @@ sealHMM3s <- fitHMM(sealPrep,
 par0b <- getPar0(model=sealHMM3s, formula=bathyForm)
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Look at the starting values
 par0b
 ```
 
-```{r message=FALSE}
+```{r message=FALSE, attr.source = ".numberLines"}
 # Now we fit the new model with bathymetry
 sealHMMb <- fitHMM(sealPrep, nbState = 3,
                    dist=list(step="gamma", angle="vm"),
@@ -667,7 +674,7 @@ sealHMMb <- fitHMM(sealPrep, nbState = 3,
                    formula=bathyForm)
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 sealHMMb
 ```
 
@@ -696,7 +703,7 @@ Let's look at it visually. First by using the generic `plot` function
 and, then, by using the function `plotStationary`, which plots the
 stationary state probabilities.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plot(sealHMMb)
 ```
 
@@ -714,7 +721,7 @@ to haul out.
 
 Here a quick plot to convince you.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Create a new file, so we can see land better
 water <- bathy
 water[water >= 0] <- NA
@@ -730,7 +737,7 @@ points(sealPrep[viterbi(sealHMMb) == 1, c("x","y")],
 
 Ok, but it is a better model?
 
-```{r}
+```{r, attr.source = ".numberLines"}
 AIC(sealHMM3s, sealHMMb)
 ```
 
@@ -738,7 +745,7 @@ Yes.
 
 What about the pseudo-residuals?
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plotPR(sealHMM3s)
 ```
 
@@ -756,7 +763,7 @@ So here we are going to create a new column that keeps track of the hour
 of the day for each observation. We are going to set it in the time zone
 where the seals are.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 sealPrep$hour <- as.integer(strftime(sealPrep$date, format = "%H", tz="Etc/GMT+4"))
 ```
 
@@ -766,7 +773,7 @@ function that represents the cyclical nature of time of day. This is the
 `cosinor` function. For more information on the `cosinor` function, see
 mathy section below.
 
-```{r message = FALSE}
+```{r message = FALSE, attr.source = ".numberLines", cache=TRUE}
 # New formula that says that the transition probabilties are affected by the time of day
 diurnForm <- ~ cosinor(hour, period = 24)
 
@@ -786,7 +793,7 @@ sealHMMdiurn <- fitHMM(sealPrep,nbState = 3,
                    formula = diurnForm)
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Let's look at the results
 sealHMMdiurn
 plot(sealHMMdiurn)
@@ -802,7 +809,7 @@ To help understand the relationship further we can also use the function
 and the stationary probability of being in each state rather than the
 relationship between the covariates and the switching probability.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plotStationary(sealHMMdiurn)
 ```
 
@@ -822,7 +829,7 @@ particular useful to use `getPar0`, because it helps set starting values
 for the parameters associated with the effects of covariates on the
 movement parameters.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Use the formula to describe the changes in the design matrix
 diurnDM <- list(angle = list(concentration = ~ cosinor(hour, period = 24)))
 
@@ -832,7 +839,7 @@ par0diurnDM <- getPar0(model=sealHMM3s, DM=diurnDM)
 par0diurnDM
 ```
 
-```{r message=FALSE}
+```{r message=FALSE, attr.source = ".numberLines", cache=TRUE}
 # Now we fit the new diurnal model with the starting values returned by getPar0
 sealHMMdiurnDM <- fitHMM(sealPrep, nbState = 3,
                         dist=list(step="gamma", angle="vm"),
@@ -840,7 +847,7 @@ sealHMMdiurnDM <- fitHMM(sealPrep, nbState = 3,
                         DM=diurnDM)
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Let's look at the results
 sealHMMdiurnDM
 plot(sealHMMdiurnDM, plotCI=TRUE)
@@ -856,7 +863,7 @@ and makes more directed movement in state 3 early in the morning.
 Note that we can combine various covariates. For example, here we are
 going to combine bathymetry and time of day.
 
-```{r message=FALSE}
+```{r message=FALSE, attr.source = ".numberLines", cache=TRUE}
 # Get parameter starting values
 par0bd <- getPar0(model=sealHMM3s, formula=bathyForm, DM=diurnDM)
 
@@ -868,7 +875,7 @@ sealHMMbd <- fitHMM(sealPrep, nbState = 3,
                         DM=diurnDM)
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Let's look at the results
 sealHMMbd
 plot(sealHMMbd)
@@ -919,7 +926,7 @@ time $t$ (i.e., you don't go in behavioural limbo).
 Let's look again at the transition probability matrix that was estimated
 in our seal example.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 sealHMM2s
 ```
 
@@ -973,7 +980,7 @@ $\gamma_{ij} = \frac{\exp(\eta_{ij})}{\sum^N_{k=1}\exp(\eta_{ik})}$.
 
 For example, for the transition probability from state 1 to state 2.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # gamma_{12}
 sealHMM2s$mle$gamma[1,2]
 # gamma_{12} calculated based on the equations above
@@ -998,11 +1005,11 @@ cos$(2 \pi \; \text{value}/\text{period})$ and
 sin$(2 \pi \; \text{value}/\text{period})$. So for example
 cos$(2 \pi \; \text{hour}/24)$.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plot(cos(2*pi*(1:24)/24), pch=19, ylab="cosinorCos", xlab="Time of day")
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 plot(sin(2*pi*(1:24)/24), pch=19, ylab="cosinorSin", xlab="Time of day")
 ```
 
@@ -1033,7 +1040,7 @@ position observed. We are also limiting the simulation to a time series
 of 200 steps. We are also setting the seed, because the animal will
 often wonder off map by chance.
 
-```{r message=FALSE}
+```{r message=FALSE, attr.source = ".numberLines", cache=TRUE}
 set.seed(1)
 sealSimB <- simData(model=sealHMMb, nbAnimals =1, spatialCovs = list(bathy=bathy),
                     initialPosition = as.matrix(sealreg[1,c("lon","lat")]),
@@ -1045,7 +1052,7 @@ sealSimFitB <- fitHMM(sealSimB,
                    formula=bathyForm)
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 # Plot simulation
 plot(water, col=bluePal(50))
 points(sealSimB[,c("x","y")],
@@ -1077,7 +1084,7 @@ functions to see whether it has a meaningful biological effect.
 For a description of the parameters needed for each of the
 distributions, please see `momentuHMM` vignette.
 
-```{r message=FALSE}
+```{r message=FALSE, attr.source = ".numberLines"}
 
 #### Wrapped Cauchy for turning angle
 kappa0wp <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close
@@ -1086,7 +1093,7 @@ sealHMMwp <- fitHMM(sealPrep, nbState = 2,
                     Par0 = list(step=c(mu0,sigma0), angle=kappa0wp))
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 AIC(sealHMM2s, sealHMMwp)# Wrapped Cauchy better
 
 #### Weibull for step length
@@ -1105,13 +1112,13 @@ mu0 <- c(2, 1) # Rate - has one less parameters
 kappa0 <- c(0.9, 0.9) # Turning angle concentration parameter, kappa close
 ```
 
-```{r message=FALSE}
+```{r message=FALSE, attr.source = ".numberLines", cache=TRUE}
 sealHMMexp <- fitHMM(sealPrep, nbState = 2,
                      dist=list(step="exp", angle="vm"),
                      Par0 = list(step=c(mu0), angle=kappa0))
 ```
 
-```{r}
+```{r, attr.source = ".numberLines"}
 AIC(sealHMM2s, sealHMMwb,sealHMMexp) # Exponential is worst
 #plot(sealHMMexp) # It has a bit more of an effect
 sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMexp)))/nrow(sealPrep) # 128 different states (12%)
@@ -1137,7 +1144,7 @@ using different time intervals. For example, look at the results when
 using 1, 4, 8 hours intervals. Look at both the fit of the model and the
 pseudo residuals.
 
-```{r}
+```{r, attr.source = ".numberLines", cache=TRUE}
 
 # Let's try different time intervals
 # 1 hr
