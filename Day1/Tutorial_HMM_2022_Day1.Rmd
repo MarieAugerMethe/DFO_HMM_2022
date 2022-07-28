@@ -9,6 +9,7 @@ editor_options:
   chunk_output_type: console
 ---
 
+<!-- To be able to have continuous line numbers -->
 <style>
 body
   { counter-reset: source-line 0; }

@@ -1,13 +1,22 @@
 ---
 title: "Hidden Markov Models: Missing data and multiple data streams"
-editor_options:
-  chunk_output_type: console
+author: "Ron Togunov & Marie Auger-Méthé"
 output:
   html_document:
     number_sections: true
-  pdf_document: 
-    number_sections: true
+    highlight: tango
+editor_options:
+  chunk_output_type: console
 ---
+
+<!-- To be able to have continuous line numbers -->
+<style>
+body
+  { counter-reset: source-line 0; }
+pre.numberSource code
+  { counter-reset: none; }
+</style>
+
 
 # Tutorial goals and set up
 
@@ -25,7 +34,7 @@ Our main objectives are to handle some of the common data problems encountered w
 
 First, we'll setup the workspace with required packages.
 
-```{r, message=FALSE}
+```{r, message=FALSE, attr.source = ".numberLines"}
 library(momentuHMM)
 library(dplyr)
 library(tidyr)
@@ -48,7 +57,7 @@ library(corrplot)  # Pearson's correlation matrix using cor()
 
 Please also set working directory to "Day2" of the HMM workshop:
 
-```{r, eval=FALSE, message=FALSE}
+```{r, eval=FALSE, message=FALSE, attr.source = ".numberLines"}
 setwd("Day2")
 ```
 
@@ -60,7 +69,7 @@ setwd("Day2")
 <!-- That's actually quite important in this tutorial about messy data. -->
 
 For simplicity, we will also only look at the data for the month of August, 2017.
-```{r import tracks, message=FALSE}
+```{r import tracks, message=FALSE, attr.source = ".numberLines"}
 tracks <- read.csv("data/tracks.csv") %>%
   filter(!is.na(x) & !is.na(y)) %>% # remove missing locations
   mutate(
@@ -80,7 +89,7 @@ The classic HMM assumes the observation data is in discrete time and that there 
 
 <!-- MAM : I would consider moving this down to the section selecting a time interval. It will make more sense there. Note that it will affetc the code down the line if you use dt in the Argos analysis. -->
 
-```{r calc_dt}
+```{r calc_dt, attr.source = ".numberLines"}
 # Calculate time difference between locations
 tracks <- tracks %>%
   mutate(dt = ifelse(ID == lead(ID), # If next data row is same individual
@@ -95,7 +104,7 @@ First, we define the coordinate reference system of the original data (in this c
 
 <!-- MAM: I would recommend using a different object name (tracks_projected). This is a pretty big transformation, and it helps to be able to go back and run stuff on the original object. -->
 
-```{r define_projection, message=FALSE}
+```{r define_projection, message=FALSE, attr.source = ".numberLines"}
 tracks <- tracks %>%
   st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
   st_set_crs(4326) %>% # define CRS
@@ -107,7 +116,7 @@ So I moved this up, and the filtering stuff down. I note that I'm not sure wheth
 
 For the first part of this tutorial, we'll use only the fastloc GPS data so we don't have to deal with location error.
 
-```{r filter_gps_data, message=FALSE}
+```{r filter_gps_data, message=FALSE, attr.source = ".numberLines"}
 # filter GPS locations only
 tracks_gps <- tracks %>% 
   filter(loc_class=="GPS")
@@ -117,7 +126,7 @@ We lose some data, particularly near the end of the tracks, but we will integrat
 
 Now, we can map the data using the `tmap` package to visualize what it looks like.
 
-```{r plot_gps_data, message=FALSE}
+```{r plot_gps_data, message=FALSE, attr.source = ".numberLines"}
 # plot GPS
 tracks_gps %>% 
   group_by(ID) %>% 
@@ -135,7 +144,7 @@ tracks_gps %>%
 There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g. seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min.
 
 Let's see what resolutions may be possible in the data by looking at the most frequent time gaps.
-```{r calc_track_dt}
+```{r calc_track_dt, attr.source = ".numberLines"}
 # identify the most frequent dt
 tracks_gps %>% 
   {table(.$dt)} %>% 
@@ -144,7 +153,7 @@ tracks_gps %>%
 ```
 
 
-```{r view_track_dt}
+```{r view_track_dt, attr.source = ".numberLines"}
 # Visualize time differences
 hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)")
 # Zoom in on short intervals
@@ -155,7 +164,7 @@ We see that that the most frequent time gap is 10 min, followed by 11, 1, 9, and
 
 We first create a function that can calculate the proportion of missing locations we would have for a given resolution.
 
-```{r proportion_NA_fx}
+```{r proportion_NA_fx, attr.source = ".numberLines"}
 # Make function to estimate proportion of missing location 
 p_na <- function(t_0, t_max, n_loc, resolution) {
   max_n_loc <- length(seq(t_0, t_max, by = as.difftime(resolution, units = "mins")))
@@ -166,7 +175,7 @@ p_na <- function(t_0, t_max, n_loc, resolution) {
 
 We can now use this function look at the proportion of NAs we would get with 1, 2, 5, 10, and 20 min resolution.
 
-```{r track_resolution_proportion_NA}
+```{r track_resolution_proportion_NA, attr.source = ".numberLines"}
 # summarise tracks
 track_summary <-
     tracks_gps %>% st_drop_geometry() %>% 
@@ -194,7 +203,7 @@ There are several ways to deal with data gaps, and I will address four
 ### Approach 1. Interpolation
 
 For large datasets with few and small gaps, the simplest approach to use linear interpolation. First, let's identify the most likely minute we have data.
-```{r identify_most_freq_dt}
+```{r identify_most_freq_dt, attr.source = ".numberLines"}
 # which minute has the most data
 tracks_gps %>% 
   st_drop_geometry() %>%  # must convert back to data.frame
@@ -205,7 +214,7 @@ tracks_gps %>%
 
 It looks like for all three tracks, the most amount of locations fall on 0 min  (i.e., 10, 20, 30, 40, 50, 60 min). Next, for each track, we will create a vector of times in which to estimate locations.
 
-```{r linear_interpolation_prep}
+```{r linear_interpolation_prep, attr.source = ".numberLines"}
 # convert tracks back to data.frame with xy coordinates
 tracks_gps_ls <- tracks_gps %>% 
   mutate(x = st_coordinates(tracks_gps)[,"X"],  
@@ -227,7 +236,7 @@ Now, we can interpolate the locations for each track.
 
 <!-- MAM: you can't have two code chunk with the same name. You won't be able to compile it. So change name above. -->
 
-```{r linear_interpolation}
+```{r linear_interpolation, attr.source = ".numberLines"}
 # function to create a data frame with approximated locations
 approx_locs <- function(tracks, times){
   data.frame(ID = times$ID,
@@ -253,14 +262,14 @@ points(st_coordinates(tracks_gps)[,"X"], st_coordinates(tracks_gps)[,"Y"], pch =
 
 Looks like it works. Let's try fitting an HMM to this. First, lets prepare the data using `prepData` and plot the data to estimate starting parameters.
 
-```{r linear_HMM_prep}
+```{r linear_HMM_prep, attr.source = ".numberLines"}
 prep_gps_linear <- prepData(tracks_gps_linear, type = "UTM")
 
-plot(prep_gps_linear, ask = F)
+plot(prep_gps_linear, ask = FALSE)
 ```
 
 
-```{r linear_HMM_starting_pars}
+```{r linear_HMM_starting_pars, attr.source = ".numberLines"}
 # Setting up the starting values
 mu0 <- c(50, 500) # Mean step length
 sigma0 <- c(50, 500) # Sd of the step length
@@ -269,7 +278,7 @@ kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
 
 Ok, were are ready. Let's fit the HMM
 
-```{r linear_HMM_fitHMM, message=FALSE}
+```{r linear_HMM_fitHMM, message=FALSE, attr.source = ".numberLines"}
 set.seed(1)
 # Fit a 2 state HMM
 HMM_gps_linear <- fitHMM(prep_gps_linear, nbState = 2, dist = list(step = "gamma",
@@ -282,7 +291,7 @@ That model does not look good. It's clear from the mapped states that state 1 la
 
 A slightly better way to interpolate locations is to fit a correlated random walk (CRW) model to the data and predict the most likely locations. `momentuHMM` contains wrapper functions to interpolate missing locations by fitting continuous-time CRW to the data based on the `crawl` package by Devin Johnson and Josh London. There are many options to fit the `crawl` model, and a detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>. Let's try to fit the most basic model using the wrapper function `crawlWrap`.
 
-```{r crawl_10_min_gps}
+```{r crawl_10_min_gps, attr.source = ".numberLines", cache=TRUE}
 set.seed(1) # crawl often fails, so I recommend always setting a seed 
 # fit crawl
 crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
@@ -294,7 +303,7 @@ plot(crw_gps_10, ask = FALSE)
 
 Notice how the predicted tracks do not make perfectly straight lines through missing sections (particularly noticeable in T172062). Next, we will extract the predicted locations and add them to the observed data.
 
-```{r crawl_predict_10_min}
+```{r crawl_predict_10_min, attr.source = ".numberLines"}
 # filter predicted locations
 tracks_gps_crw <- data.frame(crw_gps_10$crwPredict) %>% 
   filter(locType == "p") %>% 
@@ -305,7 +314,7 @@ tracks_gps_crw <- data.frame(crw_gps_10$crwPredict) %>%
 
 Now, let's try to fit the same HMM as before on this data using the same starting parameters.
 
-```{r crawl_HMM_fitHMM, message=FALSE}
+```{r crawl_HMM_fitHMM, message=FALSE, attr.source = ".numberLines"}
 set.seed(1)
 # prep data 
 prep_gps_crw <- prepData(tracks_gps_crw, type = "UTM")
@@ -319,7 +328,7 @@ kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
 HMM_gps_crw <- fitHMM(prep_gps_crw, nbState = 2, dist = list(step = "gamma",
     angle = "vm"), Par0 = list(step = c(mu0, sigma0), angle = kappa0))
 
-plot(HMM_gps_crw, ask = F)
+plot(HMM_gps_crw, ask = FALSE)
 ```
 
 That's looking much better. It looks like state 1 represents a low-speed, high tortuosity resident state, while state 2 represents higher-speed, low tortuosity travelling state. 
@@ -333,7 +342,7 @@ In many instances, this model may be sufficient. However, the significant propor
 One strategy to address large data gaps is to nullify the data streams (i.e., step length and turning angle) during moderate/large interpolated gaps where we expect that the estimated movement has is largely independent of the observed data before or after the gap. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. In this case, I will nullify predicted locations in gaps larger than 60 min. First, we will identify which steps need to be nullified, then we will prepare the data and nullify the estimated `step` and `angle` data streams. We will do this again later in the tutorial, so we will wrap it into a function called `prepData_NAGaps`.
 
 
-```{r id_nullify_gaps}
+```{r id_nullify_gaps, attr.source = ".numberLines"}
 # define function to replace step and turn angle of large gaps with NA
 NA_gaps <- function(tracks, times){
   # rows where location is within a large gap
@@ -380,7 +389,7 @@ prep_tracks_gps_crw_NAgaps <- prepData_NAGaps(tracks_gps_ls, tracks_gps_crw, 10,
 
 Now, let's try to fit the same HMM as above to this data with large gaps nullified. 
 
-```{r nullified_crawl_HMM_fitHMM, message=FALSE}
+```{r nullified_crawl_HMM_fitHMM, message=FALSE, attr.source = ".numberLines"}
 set.seed(1)
 # Setting up the starting values
 mu0 <- c(50, 500) # Mean step length
@@ -395,7 +404,7 @@ plot(HMM_gps_crw_NAgaps, ask = FALSE)
 
 Visually, the difference is subtle.
 
-```{r}
+```{r, attr.source = ".numberLines"}
 HMM_gps_crw$mle[c("step", "angle")]
 HMM_gps_crw_NAgaps$mle[c("step", "angle")]
 ```
@@ -406,7 +415,7 @@ However, the estimated parameters are quite different whether you account for th
 
 Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect the subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the ID column. We will not implement this approach in this tutorial, however, it can be done using the following code:
 
-```{r track_segmentation}
+```{r track_segmentation, attr.source = ".numberLines"}
 gap_thresh <- 3*60 # in hours (3h for illustration)
 # gaps no more than 6h per segment
 new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%  # if dif.time > gap_thresh or new ID
@@ -420,7 +429,7 @@ new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%
 
 Let's import the dive data and explore it.
 
-```{r import_depth_data, warning=FALSE}
+```{r import_depth_data, warning=FALSE, attr.source = ".numberLines"}
 dives <- read.csv("data/dives.csv") %>% 
   mutate(time = ymd_hms(time)) %>% 
   filter(month(time) == 8, day(time) > 7,  day(time) <= 14)
@@ -431,7 +440,7 @@ table(dives$dt)
 
 It appears as though there are relatively few gaps, however the gaps that exist are relatively long (> 60 mins). Therefore, I suggest that we should regularize and nullify the dive data.
 
-```{r regularise_depth_data, warning=FALSE}
+```{r regularise_depth_data, warning=FALSE, attr.source = ".numberLines"}
 # regularise data 
 dives <- dives %>% 
   group_by(ID) %>%
@@ -443,7 +452,7 @@ dives <- dives %>%
 
 Next, we have to summarise the time series into concrete data streams that can be modelled in the HMM. We can use the `diveMove` package to identify individual dives and calculate dive statistics. We must first convert the depth data to the `TDR` class for each whale. As we are working with multiple whales, we will use `lapply` to apply the `createTDR` to each whale -- we will also use `lapply` for most of `diveMove` functions. 
 
-```{r convert_depth_data_to_TDR, warning=FALSE}
+```{r convert_depth_data_to_TDR, warning=FALSE, attr.source = ".numberLines"}
 dives_ls <- split(dives, dives$ID) 
 dive_TDR <- lapply(dives_ls, function(data){
   createTDR(time = data$time, depth = data$depth, dtime = 1.25*60, file = "data/dives.csv")
@@ -457,7 +466,7 @@ Next, we must use the `calibrateDepth` to calibrate the depth data. This functio
 
 <!-- MAM: add cache=TRUE to make the kniting faster. Note that sometimes you need to remove the files created, if you run into problems. -->
 
-```{r calibrate_TDR, warning=FALSE, cache=TRUE}
+```{r calibrate_TDR, warning=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # calibrate TDR and identify dive phases
 dive_TDR_calib <- lapply(X = dive_TDR, FUN = calibrateDepth, zoc.method = "offset", offset = 0, dive.thr = 8)
 
@@ -467,16 +476,16 @@ plotTDR(dive_TDR_calib[[1]], surface = TRUE)
 
 In the interactive plot, try zooming into one of the dives and hover mouse over plot to preview the phases identified by `calibrateDepth'. The phases identified correspond to descent (D), descent/bottom (DB), bottom (B), bottom/ascent (BA), ascent (A), and surface (X). We can plot a specific dives as follows:
 
-```{r plot_TDR_calib_dives}
+```{r plot_TDR_calib_dives, attr.source = ".numberLines"}
 plotTDR(dive_TDR_calib[[1]], diveNo = 1:300, surface = TRUE)
 ```
 
 Now, we can calculate summary statistics for each dive using the function `diveStats`. There are many dive metrics that are estimated, and which ones to retain are species, data, and question specific. In this case, we will retain 8 from those calculated by `diveStats`: dive time, bottom time,  maximum depth, bottom distance (measure of "wiggling while at the bottom), post-dive duration.
 
-```{r calc-summary_dive_stats}
+```{r calc-summary_dive_stats, attr.source = ".numberLines"}
 # calculate dive stats and add dive.id to each dive 
 dive_sum <- lapply(dive_TDR_calib, function(data){
-  mutate(diveStats(data, depth.deriv = F), dive.id = row_number()) %>% 
+  mutate(diveStats(data, depth.deriv = FALSE), dive.id = row_number()) %>% 
     dplyr::select(dive.id, divetim, botttim, maxdep, bottdist, postdive.dur)}) # select variables of interest
 
 # add dive.id with depth data to each depth record
@@ -497,7 +506,7 @@ dives_df <- do.call(rbind, dives_ls)
 
 Next, we will replace any bottom time of a valid dive (dive.id > 0) to 75 s, since at least some time must be spent at the bottom. Then, we will calculate one additional metric as a proxy for dive shape; the ratio of bottom time to dive time. Dives where $\leq20\%$ of the time is spent at the bottom represent V-shaped dives, U-shaped dives are represented when $>20$ and $\leq50\%$ is spent at the bottom, and square dives are represented when $>50\%$ of the time is spent at the bottom. 
 
-```{r calc_percent_bottom}
+```{r calc_percent_bottom, attr.source = ".numberLines"}
 # replace NA bottom time of valid dives
 dives_df$botttim[dives_df$dive.id > 0 & is.na(dives_df$botttim)] <- 75
 # calculate proportion time at bottom
@@ -510,7 +519,7 @@ dives_df <- dives_df %>%
 
 The next issue is that the dive data is at a different temporal resolution (75 s) than the location data (10 min). There are two options to include both data streams in the same HMM. First, we can choose to implement a hierarchical HMM, however, this is more complicated, and  will be covered in tomorrow's tutorial. The second, which we will use here, is to summarise the depth/dive data to a 10 min resolution and include them as additional data streams with step length and turning angle. 
 
-```{r summarise_dive_data_to_10 min}
+```{r summarise_dive_data_to_10 min, attr.source = ".numberLines"}
 dives_sum <- dives_df %>% 
   # round time to same interval as location data
   mutate(time = floor_date(time, "10 min")) %>% 
@@ -534,6 +543,8 @@ dives_sum <- dives_df %>%
 head(dives_sum)
 ```
 
+<!-- MAM: this gives a lot of warnings! WHat is going on? -->
+
 Note, we used 2 different `ifelse` statements. First, `ifelse(NA_t == 10, ...)` ensured that we only calculate mean and maximum depth for periods where we have at least 1.25 min of depth data. Second, `ifelse(surf_t > 5, ...)` ensured that we only calculate dive metrics when at least half of the 10 min interval is spent in a dive, otherwise the animal is assumed to be at the surface and its dive metric is `NA`.
 
 Any of the eight variables can be used as data streams in the HMM, however, including too many would significantly increase the number of parameters to estimate, and consequently computation time. Therefore, we must select which variables to use, which there are different several approaches:
@@ -550,7 +561,7 @@ I will also add a subjective score based on the results (first number after `#` 
 
 <!-- MAM: break down this chunk and add explanations for each bits -->
 
-```{r data_structure}
+```{r data_structure, attr.source = ".numberLines"}
 vars <- c("mean_dep","max_dep","dive_t","bott_t","prop_bott",
           "max_dive_dep","bott_dist","post_dive_dur")
 # First, missing data
@@ -600,7 +611,7 @@ data.frame(var = c("mean_dep", "max_dep", "dive_t", "bott_t", "prop_bott",
 
 From my subjective interpretation of these outputs, I think the five most promising variables to include are maximum depth, dive time, mean depth, maximum dive depth, and bottom distribution. Next, let's merge the dive data streams the location data.
 
-```{r merge_track_and_dive_data}
+```{r merge_track_and_dive_data, attr.source = ".numberLines"}
 tracks_dives <- left_join(prep_tracks_gps_crw_NAgaps, 
                           dives_sum[,c("ID", "time", "max_dep", "dive_t", 
                                        "mean_dep", "max_dive_dep", "bott_dist")], 
@@ -609,7 +620,7 @@ tracks_dives <- left_join(prep_tracks_gps_crw_NAgaps,
 
 Now, we must check for co-linearity between the data streams to select 1--3 to use in the HMM. We can check co-linearity using the Pearson's correlation matrix.
 
-```{r dive_co_linearity}
+```{r dive_co_linearity, attr.source = ".numberLines"}
 # calculate and plot check Paerson's correlation matrix
 tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep", 
              "bott_dist", "step", "angle")] %>% 
@@ -624,7 +635,7 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
 
 To get starting parameters, we can fit an HMM to each one independently. We will use the gamma distribution for both and for now will use the same starting parameters.
 
-```{r prep_dive_data_and_independent_HMMs, message=FALSE}
+```{r prep_dive_data_and_independent_HMMs, message=FALSE, attr.source = ".numberLines"}
 # identify whether there is 0 data
 tracks_dives %>% 
   summarise(max_dep = sum(max_dep == 0, na.rm = T), 
@@ -646,7 +657,7 @@ HMM_bott_dist <- fitHMM(tracks_dives, nbStates = 2, dist = list(bott_dist = "gam
 
 Next, we can integrate these into one HMM together with step length and turning angle. When we specify the starting parameters, we want to think about how the states may look. For example, we might expect one resident state with slower movement, lower angular concentration, deeper dives, and greater at-depth variability. The second state may be travel, with faster movement, greater angular concentration, shallower dives, and less  at-depth variability.
 
-```{r prep_data_for_dive_move_HMM}
+```{r prep_data_for_dive_move_HMM, attr.source = ".numberLines"}
 # prep model
 stateNames = c("resident", "travel")
 nbStates = length(stateNames)
@@ -671,14 +682,14 @@ dist = list(step = "gamma", angle = "vm", max_dep = "gamma", bott_dist =  "gamma
 ```
 
 Now, we can fit the HMM with movement and dive variables.
-```{r fit_move_dive_HMM, message=FALSE, cache=TRUE}
+```{r fit_move_dive_HMM, message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 set.seed(1)
 HMM_move_dive <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 ```
 
 Let's see what it looks like.
-```{r view_HMM_move_dive}
-plot(HMM_move_dive, breaks = 100, ask = F)
+```{r view_HMM_move_dive, attr.source = ".numberLines"}
+plot(HMM_move_dive, breaks = 100, ask = FALSE)
 plotPR(HMM_move_dive)
 ```
 
@@ -691,7 +702,7 @@ Looking at the QQ plots the model appears to:
 - really wonky description of `bott_dist`
 The autocorrelation functions suggest there is remnant autocorrelation in `step` and `max_dep` that are not well described by the model. Together, this information suggests that there may be additional states that are not represented. Let's try to add one more state with an intermediate speed, lower angle concentration, and shallow dives.
 
-```{r 3_state_dive_and_move_HMM, message=FALSE, cache=TRUE}
+```{r 3_state_dive_and_move_HMM, message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # define states
 stateNames <- c("resident", "travel", "search")
 nbStates <- length(stateNames)
@@ -716,14 +727,14 @@ set.seed(1)
 HMM_move_dive_3s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 ```
 
-```{r review_3_state_HMM}
+```{r review_3_state_HMM, attr.source = ".numberLines"}
 plotPR(HMM_move_dive_3s)
 plot(HMM_move_dive_3s, breaks = 100, ask = FALSE)
 ```
 
 Interestingly, the `step` and `angle` QQ-plots were not improved much, though the `step` ACF was improved. However, compared to the 2-state model, there was a drastic improvement in QQ-plot and ACF the `max_dep` data stream and marginal improvement in the `bott_dist` data stream. The newly described state appears to have very low step length, really wide turning angle, minimal diving, and minimal at-depth activity, which may actually be indicative of resting. The "resident" state has intermediate speed and turning angle, but very deep dives and high at-depth activity, suggesting it may represent foraging. Let's try to fit one more 4-state HMM, to try and address the remaining residuals: intermediate speed, lower angle concentration, and more intermediate dives, which may represent searching behaviour.
 
-```{r 4_state_HMM, cache=TRUE}
+```{r 4_state_HMM, cache=TRUE, attr.source = ".numberLines"}
 # define states
 stateNames <- c("forage", "travel", "rest", "search")
 nbStates <- length(stateNames)
@@ -754,7 +765,7 @@ plot(HMM_move_dive_4s, breaks = 200)
 The QQ-plot for `step` is quite a bit improved, as is for `bott_dist`. The ACF for `step` is also quite improved. At this point, I'm not sure the model can be significantly improved with the existing data. Although HMMs with different number of states generally shouldn't be compared, since AIC generally favours more states, it is a good sanity check. 
 
 <!-- MAM: maybe reference Pohle for some of these statements -->
-```{r HMM state AIC}
+```{r HMM state AIC, attr.source = ".numberLines"}
 AIC(HMM_move_dive, HMM_move_dive_3s, HMM_move_dive_4s)
 ```
 
