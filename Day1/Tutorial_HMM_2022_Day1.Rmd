@@ -5,8 +5,6 @@ output:
   html_document:
     number_sections: true
     highlight: tango
-  pdf_document: 
-    number_sections: true
 editor_options:
   chunk_output_type: console
 ---
