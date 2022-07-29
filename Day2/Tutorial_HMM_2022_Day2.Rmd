@@ -999,7 +999,7 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
 
 To get starting parameters, we can fit an HMM to each one independently. We will use the gamma distribution for both and for now will use the same starting parameters.
 
-```{r prep_dive_data_and_independent_HMMs, message=FALSE, attr.source = ".numberLines"}
+```{r prep_dive_data_and_independent_HMMs, message=FALSE, attr.source = ".numberLines", cache=T}
 # identify whether there is 0 data
 tracks_dives %>% 
   summarise(max_dep = sum(max_dep == 0, na.rm = T), 
