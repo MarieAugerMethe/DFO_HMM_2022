@@ -30,7 +30,7 @@ Our main objectives are to handle some of the common data problems encountered w
 
 -   Including diving data-streams
 
-# Loading the required packages
+## Loading the required packages
 
 First, we'll setup the workspace with required packages.
 
@@ -60,7 +60,7 @@ Please also set working directory to "Day2" of the HMM workshop:
 setwd("Day2")
 ```
 
-# Import data and initial data processing
+## Import data and initial data processing
 
 For simplicity, we will also only look at the data for the month of August, 2017. 
 ```{r import_tracks, message=FALSE, attr.source = ".numberLines"}
@@ -266,7 +266,7 @@ The plotted states look relatively ok, however there is quite a weird flat secti
 A slightly better way to interpolate locations is to fit a correlated random walk (CRW) model to the data and predict the most likely locations. `momentuHMM` contains wrapper functions to interpolate missing locations by fitting continuous-time CRW to the data based on the `crawl` package by Devin Johnson and Josh London. There are many options to fit the `crawl` model, and a detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>. Let's try to fit the most basic model using the wrapper function `crawlWrap`.
 
 ```{r crawl_10_min_gps, attr.source = ".numberLines", cache=TRUE}
-set.seed(1) # crawl often fails, so I recommend always setting a seed 
+set.seed(1) # crawl can fail to fit periodically, so I recommend always setting a seed 
 # fit crawl
 crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
 # plot fit tracks
@@ -395,92 +395,10 @@ new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%
   paste(tracks_gps$ID, ., sep = "_")
 # then smaller gaps <= gap_thresh can be interpolated with crawlWrap
 ```
-## Dealing with location error and irregular time
+
+### Approach 4. Multiple imputation
+Dealing with location error and irregular time
 Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series.
-
-```{r filter_argos}
-# filter argos data
-tracks_argos <- filter(tracks_proj, loc_class != "GPS") %>%
-  # calculate dime difference
-  mutate(dt = ifelse(ID == lead(ID),
-                     difftime(lead(time), time, units = "mins"), NA),
-         # define location class factor levels  
-         loc_class = factor(loc_class,      
-                            levels = c(3, 2, 1, 0, "A", "B")))
-```
-Note: It is possible to include both GPS and ARGOS data in one model (you would define the levels as such: `levels = c("GPS", 3, 2, 1, 0, "A", "B")'. However, for this example, we will illustrate the more difficult scenario using only ARGOS data and use the GPS data as a measure of model performance.
-Visualize ARGOS tracks.
-
-```{r plot_original_data, message=FALSE}
-# convert to lines and plot using tmap
-tracks_argos %>%
-  group_by(ID) %>%
-  summarise(do_union = FALSE) %>%
-  st_cast("LINESTRING") %>%
-  tm_shape() +
-  tm_sf(col = "ID", palette = "Dark2")
-```
-
-Notice how much more noise there is in this data compared to the gps tracks. In addition, it looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`.
-
-<!-- MAM: why 10 sec? Is there are reason not to go to one sec? -->
-
-```{r offset_duplicate_times, message=FALSE}
-# 1) count the run length of each time step using rle
-run_length <- rle(tracks_argos$dt)$lengths
-# 2) create a sequence of 1:run_length for each time step
-run_seqence <- sequence(run_length)
-# 3) discount each time step that's not a duplicate by multiplying by 0
-run_seqence <- run_seqence*(tracks_argos$dt==0)
-# 4) lag run_sequence by one row and replace the first value by 0,
-# so that we iterate each time that is a duplicate of the previous row
-tracks_argos$duplicate_count <- replace_na(lag(run_seqence), 0)
-# offset duplicate times by 10s
-tracks_argos <-
-  tracks_argos %>%
-  mutate(time = time + 10*duplicate_count,
-         # recalculate time difference
-         dt = ifelse(ID == lead(ID),
-    difftime(lead(time), time, units = "mins"), NA
-  ))
-
-# last we ensure there are no identical times
-sum(tracks_argos$time == lead(tracks_argos$time), na.rm = TRUE)
-```
-
-<!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? You might want to explain why. -->
-
-Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location.
-
-```{r speed_filter, message=FALSE}
-# distance from previous location
-delta_dist <- st_distance(tracks_argos, lag(tracks_argos), by_element=TRUE)
-# time from previous location
-delta_t <- set_units(lag(tracks_argos$dt), "min")
-# calculate speed
-tracks_argos$spd <- delta_dist/delta_t
-
-# filter speed
-tracks_argos <- tracks_argos %>%
-  filter(spd < set_units(10, "m/s"))
-
-# convert to lines and plot
-tracks_argos %>% group_by(ID) %>%
-  summarise(do_union = F) %>%
-  st_cast("LINESTRING") %>%
-     tm_shape()+
-   tm_lines(col = "ID", palette = "Dark2")
-```
-
-Already looking much better.
-
-location accuracy (ignoring duplicate locations)
-```{r loc_class_freq}
-# identify proportion of each location class
-tracks_argos %>%
-  filter(dt > 0) %>%
-  {table(.$loc_class)/nrow(tracks_argos)}
-```
 
 we have to deal with location error, irregular time, and missing locations. The `crawl` model that we fit earlier can be extended to predict tracks from irregular data with location error. In this section, we will cover using `crawlWrap` to amputate regular locations when faced with more difficult data (e.g., ARGOS) and fitting an HMM to multiple imputed data.
 
@@ -488,48 +406,15 @@ we have to deal with location error, irregular time, and missing locations. The 
 
 First let's identify a resolution to work at if only obtained ARGOS data.
 
-```{r select_ARGOS_resolution}
-# visualise time differences
-hist(tracks_argos$dt[tracks_argos$dt<180], 32,
-     main = NA, xlab = "Time difference (min)")
-
-# summarise track dt
-tracks_argos %>% 
-  st_drop_geometry() %>% 
-  group_by(ID) %>% 
-  summarise(p_NA_10m = p_na(time, n_loc, 10),  # 10 min 
-            p_NA_20m = p_na(time, n_loc, 20),  # 20 min 
-            p_NA_30m = p_na(time, n_loc, 30),  # 30 min 
-            p_NA_45m = p_na(time, n_loc, 45),  # 45 min 
-            p_NA_60m = p_na(time, n_loc, 60))  # 60 min 
-            # p_NA_60m = p_na(time, n_loc, 90),  # 90 min 
-            # p_NA_60m = p_na(time, n_loc, 120)) # 120 min 
-```
-
-In this section, we will use 45 min as a trade-off between higher resolution and minimising data gaps.
-
-First, we will split the ARGOS tracks into a list by ID, and identify the times in which to predict locations.
-```{r}
-# split ARGOS tracks into list by ID
-tracks_argos_ls <- tracks_argos %>%
-  mutate(x = st_coordinates(tracks_argos)[,"X"],
-         y = st_coordinates(tracks_argos)[,"Y"]) %>%
-  st_drop_geometry() %>%
-    split(.,.$ID)
-# define times to predict for easier comparison between ARGOS and GPS tracks
-predTime <- lapply(tracks_argos_ls, function(x)
-  seq(first(x$time), last(x$time), "45 min"))
-```
-
 Next, we will define the error model for `crawl`, which describes the longitudinal and latitudinal location error associated with the location quality classes.
-```{r define_error_model}
+```{r define_error_model, attr.source = ".numberLines"}
 # define error model
 err.model <- list(x = ~ loc_class - 1, y = ~ loc_class - 1)
 ```
 
 The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)).
 
-```{r define_argos_priors, message=FALSE, eval = T}
+```{r define_argos_priors, message=FALSE, eval = T, attr.source = ".numberLines"}
 # define priors
 prior <- function(p) {
   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
@@ -544,7 +429,8 @@ prior <- function(p) {
 ```
 
 Fit `crawl` model to ARGOS tracks
-```{r fit_45_min_crawl_to_argos_tracks, message=FALSE, cache=TRUE}
+
+```{r fit_45_min_crawl_to_argos_tracks, message=FALSE, cache=TRUE, attr.source = ".numberLines"}
 # fit crawl model and predict locations at 45 min time steps
 set.seed(1)
 crwOut_argos_45 <- crawlWrap(tracks_argos,
@@ -566,7 +452,7 @@ crw_argos_45 <- data.frame(crwOut_argos_45$crwPredict) %>%
 
 For comparison, we will also use `crawlWrap` to interpolate GPS data at a 45 min frequency/
 
-```{r fit_45_min_crawl_to_gps_tracks, message=FALSE}
+```{r fit_45_min_crawl_to_gps_tracks, message=FALSE, attr.source = ".numberLines"}
 # fit crawl model and predict locations at 45 min time steps for GPS data
 set.seed(1)
 crwOut_gps_45 <- crawlWrap(obsData = tracks_gps, timeStep = "45 mins",
@@ -593,7 +479,7 @@ points(y~x, data=., type = 'l')
 We see that there is some over lap between the ARGOS (red) and GPS (black) tracks at a 45 min resolution. However, there are some sections where the ARGOS track cuts straight lines through sections where there is variability in the GPS track.
 
 Let's try to fit an HMM to the interpolated ARGOS tracks.
-```{r prep_ARGOS_tracks_and_fit_basic_HMM, message = FALSE, cache=T}
+```{r prep_ARGOS_tracks_and_fit_basic_HMM, message = FALSE, cache=T, attr.source = ".numberLines"}
 # prep tracks
 prep_argos_45 <- prepData(crw_argos_45, type = "UTM")
 prep_gps_45 <- prepData(crw_gps_45, type = "UTM")
@@ -620,7 +506,7 @@ sum(viterbi(HMM_argos_45_basic) == viterbi(HMM_gps_45_basic))/nrow(prep_argos_45
 
 The interpolated GPS track seems to fit, however the model had some issues fitting the ARGOS data. The ARGOS model is clearly defining all the interpolated segments as state 1 and the observed locations as state 2. Further, $<50/%$ of the predicted states from the ARGOS model are the same as the GPS model. I suspect the issue may be due to the large gaps where the interpolated track is basically linear. Indeed, in the GPS HMM, state 1 seems to primarily be classifying the straight interpolated sections as state 1 and the rest as state 2. We can try to address this by voiding large gaps using the `prepData_NAGaps` function we defined earlier. In this case, we will voiding gaps $>180$ min
 
-```{r prep_data_and_void_gaps}
+```{r prep_data_and_void_gaps, attr.source = ".numberLines"}
 # prep 45 min ARGOS data and void large gaps
 prep_argos_45 <- prepData_NAGaps(track_list = tracks_argos_ls, tracks_crw = crw_argos_45, res = 45, max_gap = 180, type = "UTM")
 
@@ -630,7 +516,7 @@ prep_gps_45 <- prepData_NAGaps(track_list = tracks_gps_ls, tracks_crw = crw_gps_
 
 Now, let's try to fit the same HMM as above to this data with large gaps voided.
 
-```{r voided_crawl_HMM_fitHMM_argos, message=FALSE}
+```{r voided_crawl_HMM_fitHMM_argos, message=FALSE, attr.source = ".numberLines"}
 set.seed(1)
 # Fit a 2 state HMM for 45 min ARGOS and GPS tracks
 HMM_argos_45 <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0)
@@ -646,11 +532,11 @@ sum(viterbi(HMM_argos_45) == viterbi(HMM_gps_45))/nrow(prep_argos_45)
 
 Both data sets seem to fit easily. There isn't a large change between this GPS model and the previous one (without voiding large gaps); $94/%$ of the predicted states are the same. However, the overlap between the ARGOS and GPS models is much higher than previously ($74\%$), suggesting the ARGOS model with voided gaps is significantly improved. However, there is still a notable discrepancy between the ARGOS and the GPS HMMs.
 
-### Multiple imputation
+#### Multiple imputation
 
 ----- WORK IN PROGRESS ------
 first, fit MI to GPS data for starting parameters
-```{r}
+```{r, attr.source = ".numberLines"}
 # fit crawl to 1 gpstrack and predict locations at 45 min time stepstracks <-
 cwr_gps_sub <- tracks_gps %>%
   filter(ID == "T172062")
@@ -679,7 +565,7 @@ plot(nfsFits_gps, ask = F)
 ```
 
 - working on subset track - 
-```{r subset_argos_T172062}
+```{r subset_argos_T172062, attr.source = ".numberLines"}
 # subset 
 sub_argos <- tracks_argos %>%
     filter(ID == "T172062") %>%
@@ -690,7 +576,7 @@ predTime <- lapply(sub_argos, function(x)
 ```
 
 `crawl` works best when there is either low location error (e.g., GPS data), when the animal movement is significantly greater than the location error, or there is a large amount of data. When any/all of these criteria are met, we can provide priors as follows:
-```{r argos_priors_when_good, message=FALSE, eval = FALSE}
+```{r argos_priors_when_good, message=FALSE, eval = FALSE, attr.source = ".numberLines"}
 # define priors
 prior <- function(p) {
   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
@@ -704,7 +590,7 @@ prior <- function(p) {
 }
 ```
 However, in our case, the location error is often larger than narwhals' movement over a 45 min period, so we will actually fix the location error estimates, provide a prior for beta (a measure of autocorrelation in narwhal movement), and allow the model to estimate sigma without any priors.
-```{r define_sub_argos_priors, message=FALSE}
+```{r define_sub_argos_priors, message=FALSE, attr.source = ".numberLines"}
 # define priors
 prior <-  function(p) {
       # skip p[1] as we won't provide a prior for sigma
@@ -713,7 +599,7 @@ prior <-  function(p) {
 ```
 
 calculate known error between argos and GPS to get Fix parameters for error model.
-```{r calculate_sub_argos_fix_par, message=FALSE}
+```{r calculate_sub_argos_fix_par, message=FALSE, attr.source = ".numberLines"}
 # combine GPS and ARGOS narwhal locations 
 data <- data.frame(ID = prep_gps_45$ID,
                    time = prep_gps_45$time,
@@ -758,7 +644,7 @@ fixPar <- c(log(767), log(969), log(1200), # x 3,2,1
 ```
 
 fit crawl model to the first narwhal
-```{r calculate_define_sub_argos_priors, message=FALSE, eval=TRUE, cache=T}
+```{r calculate_define_sub_argos_priors, message=FALSE, eval=TRUE, cache=T, attr.source = ".numberLines"}
 # fit
 set.seed(1)
 argos_45_crwOut_1trk_fx <-
@@ -775,7 +661,7 @@ plot(argos_45_crwOut_1trk_fx)
 ```
 
 fit multiple imputation HMM
-```{r MIfitHMM_argos_priors, message=FALSE, cache=T}
+```{r MIfitHMM_argos_priors, message=FALSE, cache=T, attr.source = ".numberLines"}
 # nfsFits <- MIfitHMM(argos_45_crwOut_1trk, nSims = 1, fit = F)
 set.seed(1)
 MIfit_argos <- MIfitHMM(argos_45_crwOut_1trk_fx, nSims = 100, fit = T,
@@ -1921,4 +1807,400 @@ Argos data section - for now removed. We could do an extra tutorial.
 <!--   predTime = predTime) -->
 <!-- gpsFits <- MIfitHMM(gps_45_crwOut, nSims = 1, fit = F) -->
 <!-- ``` -->
+## Modelling emission probabilities
+## Bonus 
+<!-- ### Dealing with location error and irregular time -->
+<!-- Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series. -->
+
+<!-- ```{r filter_argos} -->
+<!-- # filter argos data -->
+<!-- tracks_argos <- filter(tracks_proj, loc_class != "GPS") %>% -->
+<!--   # calculate dime difference -->
+<!--   mutate(dt = ifelse(ID == lead(ID), -->
+<!--                      difftime(lead(time), time, units = "mins"), NA), -->
+<!--          # define location class factor levels   -->
+<!--          loc_class = factor(loc_class,       -->
+<!--                             levels = c(3, 2, 1, 0, "A", "B"))) -->
+<!-- ``` -->
+<!-- Note: It is possible to include both GPS and ARGOS data in one model (you would define the levels as such: `levels = c("GPS", 3, 2, 1, 0, "A", "B")'. However, for this example, we will illustrate the more difficult scenario using only ARGOS data and use the GPS data as a measure of model performance. -->
+<!-- Visualize ARGOS tracks. -->
+
+<!-- ```{r plot_original_data, message=FALSE} -->
+<!-- # convert to lines and plot using tmap -->
+<!-- tracks_argos %>% -->
+<!--   group_by(ID) %>% -->
+<!--   summarise(do_union = FALSE) %>% -->
+<!--   st_cast("LINESTRING") %>% -->
+<!--   tm_shape() + -->
+<!--   tm_sf(col = "ID", palette = "Dark2") -->
+<!-- ``` -->
+
+<!-- Notice how much more noise there is in this data compared to the gps tracks. In addition, it looks like there are at least several outlier points. We can address most of these using a coarse speed filter. However, before we can calculate speed ($\frac{\Delta dist}{\Delta t}$), we must address the duplicate time-stamps (since we cannot divide by 0 to calculate speed). It is often not possible to reliably identify which record is more accurate to discard. Therefore, it's best to retain as as much data and offset duplicate times slightly. We will first offset duplicate times by adding 10s for each consecutive row with a `dt == 0`. -->
+
+<!-- <!-- MAM: why 10 sec? Is there are reason not to go to one sec? --> -->
+
+<!-- ```{r offset_duplicate_times, message=FALSE} -->
+<!-- # 1) count the run length of each time step using rle -->
+<!-- run_length <- rle(tracks_argos$dt)$lengths -->
+<!-- # 2) create a sequence of 1:run_length for each time step -->
+<!-- run_seqence <- sequence(run_length) -->
+<!-- # 3) discount each time step that's not a duplicate by multiplying by 0 -->
+<!-- run_seqence <- run_seqence*(tracks_argos$dt==0) -->
+<!-- # 4) lag run_sequence by one row and replace the first value by 0, -->
+<!-- # so that we iterate each time that is a duplicate of the previous row -->
+<!-- tracks_argos$duplicate_count <- replace_na(lag(run_seqence), 0) -->
+<!-- # offset duplicate times by 10s -->
+<!-- tracks_argos <- -->
+<!--   tracks_argos %>% -->
+<!--   mutate(time = time + 10*duplicate_count, -->
+<!--          # recalculate time difference -->
+<!--          dt = ifelse(ID == lead(ID), -->
+<!--     difftime(lead(time), time, units = "mins"), NA -->
+<!--   )) -->
+
+<!-- # last we ensure there are no identical times -->
+<!-- sum(tracks_argos$time == lead(tracks_argos$time), na.rm = TRUE) -->
+<!-- ``` -->
+
+<!-- <!-- MAM: why are you using a speed filter? Aren't you using crawl to handle the error? You might want to explain why. --> -->
+
+<!-- Now, we can apply a speed filter to remove locations that are faster than some threshold -- in this case we will exclude any locations $>10$ m/s from the previous location. -->
+
+<!-- ```{r speed_filter, message=FALSE} -->
+<!-- # distance from previous location -->
+<!-- delta_dist <- st_distance(tracks_argos, lag(tracks_argos), by_element=TRUE) -->
+<!-- # time from previous location -->
+<!-- delta_t <- set_units(lag(tracks_argos$dt), "min") -->
+<!-- # calculate speed -->
+<!-- tracks_argos$spd <- delta_dist/delta_t -->
+
+<!-- # filter speed -->
+<!-- tracks_argos <- tracks_argos %>% -->
+<!--   filter(spd < set_units(10, "m/s")) -->
+
+<!-- # convert to lines and plot -->
+<!-- tracks_argos %>% group_by(ID) %>% -->
+<!--   summarise(do_union = F) %>% -->
+<!--   st_cast("LINESTRING") %>% -->
+<!--      tm_shape()+ -->
+<!--    tm_lines(col = "ID", palette = "Dark2") -->
+<!-- ``` -->
+
+<!-- Already looking much better. -->
+
+<!-- location accuracy (ignoring duplicate locations) -->
+<!-- ```{r loc_class_freq} -->
+<!-- # identify proportion of each location class -->
+<!-- tracks_argos %>% -->
+<!--   filter(dt > 0) %>% -->
+<!--   {table(.$loc_class)/nrow(tracks_argos)} -->
+<!-- ``` -->
+
+<!-- we have to deal with location error, irregular time, and missing locations. The `crawl` model that we fit earlier can be extended to predict tracks from irregular data with location error. In this section, we will cover using `crawlWrap` to amputate regular locations when faced with more difficult data (e.g., ARGOS) and fitting an HMM to multiple imputed data. -->
+
+<!-- <!-- MAM: here you have to put a bit more info on crawl. I.e. it's a state space models that handle error, etc. --> -->
+
+<!-- First let's identify a resolution to work at if only obtained ARGOS data. -->
+
+<!-- ```{r select_ARGOS_resolution} -->
+<!-- # visualise time differences -->
+<!-- hist(tracks_argos$dt[tracks_argos$dt<180], 32, -->
+<!--      main = NA, xlab = "Time difference (min)") -->
+
+<!-- # summarise track dt -->
+<!-- tracks_argos %>%  -->
+<!--   st_drop_geometry() %>%  -->
+<!--   group_by(ID) %>%  -->
+<!--   summarise(p_NA_10m = p_na(time, n_loc, 10),  # 10 min  -->
+<!--             p_NA_20m = p_na(time, n_loc, 20),  # 20 min  -->
+<!--             p_NA_30m = p_na(time, n_loc, 30),  # 30 min  -->
+<!--             p_NA_45m = p_na(time, n_loc, 45),  # 45 min  -->
+<!--             p_NA_60m = p_na(time, n_loc, 60))  # 60 min  -->
+<!--             # p_NA_60m = p_na(time, n_loc, 90),  # 90 min  -->
+<!--             # p_NA_60m = p_na(time, n_loc, 120)) # 120 min  -->
+<!-- ``` -->
+
+<!-- In this section, we will use 45 min as a trade-off between higher resolution and minimising data gaps. -->
+
+<!-- First, we will split the ARGOS tracks into a list by ID, and identify the times in which to predict locations. -->
+<!-- ```{r} -->
+<!-- # split ARGOS tracks into list by ID -->
+<!-- tracks_argos_ls <- tracks_argos %>% -->
+<!--   mutate(x = st_coordinates(tracks_argos)[,"X"], -->
+<!--          y = st_coordinates(tracks_argos)[,"Y"]) %>% -->
+<!--   st_drop_geometry() %>% -->
+<!--     split(.,.$ID) -->
+<!-- # define times to predict for easier comparison between ARGOS and GPS tracks -->
+<!-- predTime <- lapply(tracks_argos_ls, function(x) -->
+<!--   seq(first(x$time), last(x$time), "45 min")) -->
+<!-- ``` -->
+
+<!-- Next, we will define the error model for `crawl`, which describes the longitudinal and latitudinal location error associated with the location quality classes. -->
+<!-- ```{r define_error_model} -->
+<!-- # define error model -->
+<!-- err.model <- list(x = ~ loc_class - 1, y = ~ loc_class - 1) -->
+<!-- ``` -->
+
+<!-- The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)). -->
+
+<!-- ```{r define_argos_priors, message=FALSE, eval = T} -->
+<!-- # define priors -->
+<!-- prior <- function(p) { -->
+<!--   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3 -->
+<!--   dnorm(p[2], log(500),  0.2, log = TRUE) +  # 2 -->
+<!--   dnorm(p[3], log(1500), 0.2, log = TRUE) +  # 1 -->
+<!--   dnorm(p[4], log(2500), 0.4, log = TRUE) +  # 0 -->
+<!--   dnorm(p[5], log(2500), 0.4, log = TRUE) +  # A -->
+<!--   dnorm(p[6], log(2500), 0.4, log = TRUE) +  # B -->
+<!--   # skip p[7] as we won't provide a prior for sigma -->
+<!--   dnorm(p[8], -4, 3, log = TRUE)  # beta parameter -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- Fit `crawl` model to ARGOS tracks -->
+<!-- ```{r fit_45_min_crawl_to_argos_tracks, message=FALSE, cache=TRUE} -->
+<!-- # fit crawl model and predict locations at 45 min time steps -->
+<!-- set.seed(1) -->
+<!-- crwOut_argos_45 <- crawlWrap(tracks_argos, -->
+<!--   timeStep = "45 min", -->
+<!--   retryFits = 1, Time.name = "time", -->
+<!--   err.model = err.model, -->
+<!--   prior = prior, -->
+<!--   predTime = predTime) -->
+<!-- # check that each track converged (0 = converged) -->
+<!-- sapply(crwOut_argos_45$crwFits, function(x)x$convergence) -->
+<!-- plot(crwOut_argos_45, ask = FALSE) -->
+<!-- # convert to data.frame and extract predicted locations -->
+<!-- crw_argos_45 <- data.frame(crwOut_argos_45$crwPredict) %>% -->
+<!--   filter(locType == "p") %>% -->
+<!--   dplyr::select(mu.x, mu.y, time, ID, loc_class) %>% -->
+<!--   dplyr::rename(x = "mu.x", y = "mu.y") -->
+<!-- ``` -->
+<!-- <!-- MAM: I get some warnings here, that something is going on --> -->
+
+<!-- For comparison, we will also use `crawlWrap` to interpolate GPS data at a 45 min frequency/ -->
+
+<!-- ```{r fit_45_min_crawl_to_gps_tracks, message=FALSE} -->
+<!-- # fit crawl model and predict locations at 45 min time steps for GPS data -->
+<!-- set.seed(1) -->
+<!-- crwOut_gps_45 <- crawlWrap(obsData = tracks_gps, timeStep = "45 mins", -->
+<!--                         predTime = predTime)  -->
+
+<!-- # check that each track converged (0 = converged) -->
+<!-- sapply(crwOut_gps_45$crwFits, function(x)x$convergence) -->
+<!-- # convert to data.frame and extract predicted locations -->
+<!-- crw_gps_45 <- data.frame(crwOut_gps_45$crwPredict) %>% -->
+<!--   filter(locType == "p") %>% -->
+<!--   dplyr::select(mu.x, mu.y, time, ID) %>% -->
+<!--   dplyr::rename(x = "mu.x", y = "mu.y") -->
+
+<!-- # compare estimated tracks -->
+<!-- filter(crw_argos_45, ID=="T172062")  %>% -->
+<!-- plot(y~x, data=., type = 'l', col = 'red', asp = 1) -->
+<!-- filter(crw_gps_45, ID=="T172062") %>% -->
+<!-- points(y~x, data=., type = 'l') -->
+
+<!-- ``` -->
+
+<!-- <!-- MAM: I get some warnings here, that something is going on --> -->
+
+<!-- We see that there is some over lap between the ARGOS (red) and GPS (black) tracks at a 45 min resolution. However, there are some sections where the ARGOS track cuts straight lines through sections where there is variability in the GPS track. -->
+
+<!-- Let's try to fit an HMM to the interpolated ARGOS tracks. -->
+<!-- ```{r prep_ARGOS_tracks_and_fit_basic_HMM, message = FALSE, cache=T} -->
+<!-- # prep tracks -->
+<!-- prep_argos_45 <- prepData(crw_argos_45, type = "UTM") -->
+<!-- prep_gps_45 <- prepData(crw_gps_45, type = "UTM") -->
+
+<!-- # setup model -->
+<!-- dist <- list(step = "gamma", angle = "vm") -->
+<!-- # Setting up the starting values -->
+<!-- mu0 <- c(1000, 3000) # mu step -->
+<!-- sigma0 <- mu0      # Sd step -->
+<!-- kappa0 <- c(1, 3)    # kappa angle -->
+<!-- Par0 <- list(step = c(mu0, sigma0), angle = kappa0) -->
+
+<!-- # Fit a 2 state HMM for 45 min ARGOS and GPS tracks -->
+<!-- set.seed(1) -->
+<!-- HMM_argos_45_basic <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0) -->
+<!-- HMM_gps_45_basic <- fitHMM(prep_gps_45, nbState = 2, dist = dist, Par0 = Par0) -->
+
+<!-- plot(HMM_argos_45_basic, animals = "T172062", ask = F) -->
+<!-- plot(HMM_gps_45_basic, animals = "T172062", ask = F) -->
+
+<!-- # compare predicted states -->
+<!-- sum(viterbi(HMM_argos_45_basic) == viterbi(HMM_gps_45_basic))/nrow(prep_argos_45) -->
+<!-- ``` -->
+
+<!-- The interpolated GPS track seems to fit, however the model had some issues fitting the ARGOS data. The ARGOS model is clearly defining all the interpolated segments as state 1 and the observed locations as state 2. Further, $<50/%$ of the predicted states from the ARGOS model are the same as the GPS model. I suspect the issue may be due to the large gaps where the interpolated track is basically linear. Indeed, in the GPS HMM, state 1 seems to primarily be classifying the straight interpolated sections as state 1 and the rest as state 2. We can try to address this by voiding large gaps using the `prepData_NAGaps` function we defined earlier. In this case, we will voiding gaps $>180$ min -->
+
+<!-- ```{r prep_data_and_void_gaps} -->
+<!-- # prep 45 min ARGOS data and void large gaps -->
+<!-- prep_argos_45 <- prepData_NAGaps(track_list = tracks_argos_ls, tracks_crw = crw_argos_45, res = 45, max_gap = 180, type = "UTM") -->
+
+<!-- # prep 45 min gps data and void large gaps -->
+<!-- prep_gps_45 <- prepData_NAGaps(track_list = tracks_gps_ls, tracks_crw = crw_gps_45, res = 45, max_gap = 180, type = "UTM") -->
+<!-- ``` -->
+
+<!-- Now, let's try to fit the same HMM as above to this data with large gaps voided. -->
+
+<!-- ```{r voided_crawl_HMM_fitHMM_argos, message=FALSE} -->
+<!-- set.seed(1) -->
+<!-- # Fit a 2 state HMM for 45 min ARGOS and GPS tracks -->
+<!-- HMM_argos_45 <- fitHMM(prep_argos_45, nbState = 2, dist = dist, Par0 = Par0) -->
+<!-- HMM_gps_45 <- fitHMM(prep_gps_45, nbState = 2, dist = dist, Par0 = Par0) -->
+
+<!-- plot(HMM_argos_45, animals = "T172062", ask = "F") -->
+<!-- plot(HMM_gps_45, animals = "T172062", ask = "F") -->
+<!-- # compare new and original GPS model predicted states -->
+<!-- sum(viterbi(HMM_gps_45_basic) == viterbi(HMM_gps_45))/nrow(prep_argos_45) -->
+<!-- # compare new and original GPS model predicted states -->
+<!-- sum(viterbi(HMM_argos_45) == viterbi(HMM_gps_45))/nrow(prep_argos_45) -->
+<!-- ``` -->
+
+<!-- Both data sets seem to fit easily. There isn't a large change between this GPS model and the previous one (without voiding large gaps); $94/%$ of the predicted states are the same. However, the overlap between the ARGOS and GPS models is much higher than previously ($74\%$), suggesting the ARGOS model with voided gaps is significantly improved. However, there is still a notable discrepancy between the ARGOS and the GPS HMMs. -->
+
+<!-- #### Multiple imputation -->
+
+----- WORK IN PROGRESS ------
+first, fit MI to GPS data for starting parameters
+```{r}
+# fit crawl to 1 gpstrack and predict locations at 45 min time stepstracks <-
+cwr_gps_sub <- tracks_gps %>%
+  filter(ID == "T172062")
+
+predTime <- lapply(split(cwr_gps_sub,cwr_gps_sub$ID), function(x)
+  seq(first(x$time), last(x$time), "45 min"))
+
+# fit crawl
+set.seed(1)
+crwOut_gps_T172062 <-
+  crawlWrap(cwr_gps_sub,
+  retryFits = 1, Time.name = "time",
+  predTime = predTime)
+crwOut_gps_T172062$crwFits$T172062
+
+# define starting paraeters
+mu0 <- c(1000, 3000) # mu step
+sigma0 <- mu0        # sd step
+kappa0 <- c(1, 3)    # kappa angle
+Par0 <- list(step = c(mu0, sigma0), angle = kappa0)
+
+# fit multiple imputation HMM to subset to GPS tracks
+nfsFits_gps <- MIfitHMM(crwOut_gps_T172062, nSims = 10,
+                     nbStates = 2, dist = dist, Par0 = Par0, fit = T)
+plot(nfsFits_gps, ask = F)
+```
+
+- working on subset track - 
+```{r subset_argos_T172062}
+# subset 
+sub_argos <- tracks_argos %>%
+    filter(ID == "T172062") %>%
+    list()
+# recalculate predTime
+predTime <- lapply(sub_argos, function(x)
+  seq(first(x$time), last(x$time), "45 min"))
+```
+
+`crawl` works best when there is either low location error (e.g., GPS data), when the animal movement is significantly greater than the location error, or there is a large amount of data. When any/all of these criteria are met, we can provide priors as follows:
+```{r argos_priors_when_good, message=FALSE, eval = FALSE}
+# define priors
+prior <- function(p) {
+  dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
+  dnorm(p[2], log(500),  0.2, log = TRUE) +  # 2
+  dnorm(p[3], log(1500), 0.2, log = TRUE) +  # 1
+  dnorm(p[4], log(2500), 0.4, log = TRUE) +  # 0
+  dnorm(p[5], log(2500), 0.4, log = TRUE) +  # A
+  dnorm(p[6], log(2500), 0.4, log = TRUE) +  # B
+  # skip p[7] as we won't provide a prior for sigma
+  dnorm(p[8], -4, 0, log = TRUE)  # beta parameter
+}
+```
+However, in our case, the location error is often larger than narwhals' movement over a 45 min period, so we will actually fix the location error estimates, provide a prior for beta (a measure of autocorrelation in narwhal movement), and allow the model to estimate sigma without any priors.
+```{r define_sub_argos_priors, message=FALSE}
+# define priors
+prior <-  function(p) {
+      # skip p[1] as we won't provide a prior for sigma
+      dnorm(p[2], -4, 0.1, log = TRUE)  # beta parameter
+}
+```
+
+calculate known error between argos and GPS to get Fix parameters for error model.
+```{r calculate_sub_argos_fix_par, message=FALSE}
+# combine GPS and ARGOS narwhal locations 
+data <- data.frame(ID = prep_gps_45$ID,
+                   time = prep_gps_45$time,
+                   x_gps = prep_gps_45$x, y_gps = prep_gps_45$y,
+                   x_argos = prep_argos_45$x, y_argos = prep_argos_45$y) %>%
+  # calculate difference between GPS and ARGOS locations
+  mutate(#d_loc = sqrt((x_argos-x_gps)^2+(y_argos-y_gps)^2),
+         dx = abs(x_argos-x_gps), dy = abs(y_argos-y_gps)) %>%
+  setDT() # convert to data.table
+
+# Select ARGOS columns to merge and convert track to data.table
+tracks_argos_dt <-tracks_argos %>%
+  dplyr::select(ID, time, loc_class) %>%
+  setDT()
+
+# set keys to join
+setkey(data, ID, time)
+setkey(tracks_argos_dt, ID, time)
+
+# rolling join
+data.df <- as.data.frame(tracks_argos_dt[data, roll = TRUE])
+
+# void large gaps so simulated locations do not skew model error
+# data.df$d_loc[is.na(prep_argos_45$step)] <- NA
+data.df$dx[is.na(prep_argos_45$step)] <- NA
+data.df$dy[is.na(prep_argos_45$step)] <- NA
+
+# calculate mean x and y error for each location classusing summarise
+data.df %>% 
+  group_by(loc_class) %>% # group by location class
+  summarise(#mean_d_loc = mean(d_loc, na.rm = T),
+            #sd_d_loc = sd(d_loc, na.rm = T),
+            mean_dx = mean(dx, na.rm = T),
+            mean_dy = mean(dy, na.rm = T))
+
+# define fixPar using abover 
+fixPar <- c(log(767), log(969), log(1200), # x 3,2,1 
+            log(1831),log(1811),log(1972), # x 0,A,B
+            log(717), log(1343), log(1150),# y 3,2,1 
+            log(1666),log(1448),log(1882), # y 0,A,B
+            NA, NA) # sgima, beta (to be estimated)
+```
+
+fit crawl model to the first narwhal
+```{r calculate_define_sub_argos_priors, message=FALSE, eval=TRUE, cache=T}
+# fit
+set.seed(1)
+argos_45_crwOut_1trk_fx <-
+  crawlWrap(tracks_argos_ls[[1]],
+            retryFits = 100, retrySD = 5,
+            Time.name = "time",
+            err.model = err.model,
+            prior = prior,
+            fixPar = fixPar,
+            predTime = predTime[[1]])
+# view
+argos_45_crwOut_1trk_fx$crwFits$T172062
+plot(argos_45_crwOut_1trk_fx)
+```
+
+fit multiple imputation HMM
+```{r MIfitHMM_argos_priors, message=FALSE, cache=T}
+# nfsFits <- MIfitHMM(argos_45_crwOut_1trk, nSims = 1, fit = F)
+set.seed(1)
+MIfit_argos <- MIfitHMM(argos_45_crwOut_1trk_fx, nSims = 100, fit = T,
+                        nbStates = 2, dist = dist, ncores = 10,
+                        Par0 = getPar0(nfsFits_gps)$Par)
+#pool results 
+MIpool_argos <- MIpool(MIfit_argos[[2]])
+# plot pooled data
+plot(MIpool_argos, ask = F)
+
+sum(MIpool_argos$Par$states == viterbi(HMM_gps_45)[which(HMM_gps_45$data$ID=="T172062")])/nrow(sub_argos[[1]])
+```
+$70\%$ overlap in predicted states
 
