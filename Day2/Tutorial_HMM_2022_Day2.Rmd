@@ -277,7 +277,8 @@ The plotted states look relatively ok, however there is quite a weird flat secti
 A slightly better way to interpolate locations is to fit a continuous-time correlated random walk (CTCRW) model to the data and predict the most likely locations. `momentuHMM` contains wrapper functions to interpolate missing locations by fitting a CTCRW to the data based on the `crawl` package by Devin Johnson and Josh London. There are many options to fit the CTCRW model, and a detailed tutorial for analysis with `crawl` is available here: propperly  <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>. Let's try to fit the most basic model using the wrapper function `crawlWrap`.
 
 ```{r crawl_10_min_gps, attr.source = ".numberLines", cache=TRUE}
-set.seed(5)
+set.seed(5) # crawl can fail to fit periodically, so I recommend always setting a seed 
+
 # fit crawl
 crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
 # view that all parameters were propperly estimated 
@@ -412,7 +413,6 @@ new_ID <- (tracks_gps$dt > gap_thresh | tracks_gps$ID != lag(tracks_gps$ID)) %>%
   paste(tracks_gps$ID, ., sep = "_")
 # then smaller gaps <= gap_thresh can be interpolated with crawlWrap
 ```
-
 ### Approach 4. Multiple imputation
 The last approach to estimate missing locations and regularise the data is multiple imputation (Hooten et al. 2017; McClintock 2017). Multiple imputation works by first fitting a CTCRW model to the original data, second, drawing (i.e., simulating) a number of realisations of the position process based on the CTCRW model, third, fitting HMMs to each of the simulated realisations, and finally, pooling the estimated parameters. 
 
@@ -450,6 +450,7 @@ ncores <- round(ncores*0.6)
 
 Next, let's simulate 12 realisations of the CTCRW and fit HMMs to each in parallel. 
 ```{r fit_10min_GPS_MI, attr.source = ".numberLines", cache=TRUE}
+
 set.seed(1)
 # fit multiple imputation HMM to the 10 min GPS crawl model
 HMM_gps_MI <- MIfitHMM(crw_gps_10, nSims = 12, ncores = ncores,
