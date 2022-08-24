@@ -957,10 +957,10 @@ prep_tracks_gps_crw_NAgaps_wgs84 <- prep_tracks_gps_crw_NAgaps_wgs84 %>%
   st_drop_geometry()
 ```
 
-At the small scale we are using, there is not much spatial variation in the tides, so for faster processing, we can just estimate tidal currents at each narwhal time step using the coordinates for the centre of Eclipse sound based.
+At the small scale we are using, there is not much spatial variation in the tides, so for faster processing, we can just estimate tidal currents at each narwhal time step using the coordinates for the centre of Eclipse sound ($79.7^\circ$ W, $72.6^\circ$N).
 ```{r get_htide, attr.source = ".numberLines", cache=TRUE}
 prep_tracks_gps_crw_NAgaps_wgs84 <- prep_tracks_gps_crw_NAgaps_wgs84 %>% 
-  group_by(ID) %>%  # calc_earthtide assumes data is chronological, so we must group data by narwhal ID
+  group_by(ID) %>%  # group by narwhal ID as calc_earthtide assumes chronological data
   mutate(htide = calc_earthtide(utc = time,
                                 do_predict = TRUE,
                                 method = 'horizontal_displacement',
@@ -979,7 +979,6 @@ If narwhal movement occurred at a larger scale (e.g., if we studied a longer per
 prep_tracks_gps_crw_NAgaps_wgs84 <- prep_tracks_gps_crw_NAgaps_wgs84 %>%
   rowwise() %>%  # must apply calc_earthtide function independently to each row
   mutate(htide = calc_earthtide(utc = time,
-                                do_predict = TRUE,
                                 method = 'horizontal_displacement',
                                 latitude = y,  # use x,y coordinates from each row
                                 longitude = x)[,2]) %>%
@@ -1044,7 +1043,7 @@ DM <- list(step = stepDM)
 HMM_S2StepTides <- fitHMM(prep_tracks_gps_crw_NAgaps, nbState = nbState, dist = dist, Par0 = Par0, DM = DM, stateNames = stateNames)
 
 # plot
-plot(HMM_S2StepTides, ask = FALSE, plotCI = T)
+plot(HMM_S2StepTides, ask = FALSE, plotCI = T, plotTracks = F)
 
 # show parameter estimates and confidence intervals
 HMM_S2StepTides$CIbeta$step[c("est", "lower", "upper")] %>%  # get estimate and CI
@@ -1073,6 +1072,7 @@ stepDM <- matrix(c(1, 0, 0,      0, 0, # mean 1 (intercept-only)
                  dimnames = list(c("mean_1","mean_2","sd_1","sd_2"),
                                  c("mean_1", "mean_2:int", "mean_2:htide", "sd_1", "sd_2")))
 DM <- list(step = stepDM)
+# fit HMM as in previous code chunk
 ```
 Note: adding dimension names is optional, but can help with interpretation. Remember, each row of the DM corresponds with the state-specific distribution parameters and each column represents the beta coefficients estimated by the model. A basic HMM without any covariates is effectively using a diagonal matrix of 1s. Multiple values in one row are added multiplied by their respective beta coefficients then transformed using the link function (in this case, log for mean and SD). Mathematically, the above DM can be written as follows:
 \begin{equation} \label{eq:sl}
@@ -1081,7 +1081,7 @@ Note: adding dimension names is optional, but can help with interpretation. Reme
         \begin{cases}
              \begin{aligned}
              & \beta_{1} \\
-             & \beta_{2} + \beta_{3}r^{($htide$)}_t \\
+             & \beta_{2} + \beta_{3}r^{(\mathrm{htide})}_t \\
              \end{aligned}
         \end{cases}
         \quad
@@ -1105,8 +1105,102 @@ Note: adding dimension names is optional, but can help with interpretation. Reme
 \end{equation}  
 where $\mu_S^{(l)}$ is the state-specific mean of step length, $\sigma_{S}^{(l)}$ is the state-specific SD of step length, $\beta \in (-\infty, \infty)$ are the beta coefficients estimated by the model, and $r^{(htide)}_t$ is the rate of horizontal tide movement at time $t$.
 
-### cov on turn angle 
-```{r eval=FALSE, include=FALSE}
+### Covariates on turning angle emission probability
+ It is possible to include covariates on every any data stream including turning angle. Thus far, we have been assuming that all movement tends to have directional persistence such that the mean turning angle in every state is $\mu_S^{(\phi)} = 0$ and the angular concentration is state specific (i.e., $\kappa_S{(\phi)}$ is state-specific). If we want to include covariates on $\kappa$, we can do so as in the previous section. To include covariates on the mean turning angle $\mu_S^{(\phi)}$, we must also add `circularAngleMean = TRUE` in `fitHMM` and also include additional starting parameters for angle (thus far we have only been specifying starting parameters for $\kappa_S$). 
+When no covariates are included on the mean turning angle, we are effectively describing the movement as a correlated random walk (CRW), wherein the only factor that determines the direction an animal moves is directional persistence (i.e., tending to move forward in the same direction). However, most behaviours exhibit some directional bias relative to the external stimuli. For example, when travelling, narwhals may orient themselves in the same direction as currents to save energy, or if killer whales are present on a large scale (e.g., within 100 km) they may orient themselves toward shore as suggested by [Breed et al. (2017)](https://www.pnas.org/doi/abs/10.1073/pnas.1611707114), or if killer whales are very near, they may orient their movement directly away from killer whales. Movement where orientation is a combination of correlated directional persistence and bias relative to external stimuli is known as a biased correlated random walk (BCRW). Many interesting hypotheses can be tested by including covariates on the mean turning angle. Directional bias can be directly toward or away from a stimulus (e.g., resource patch, or predator location) or it may be at some angle relative to the stimulus (e.g., bird flight $45^\circ$ relative to wind to maximise ground speed, polar bear crosswind movement during olfactory search, or sea turtle navigation relative to magnetic fields). Movement with an angled bias is known as \textit{menotaxis} and was the focus of my PhD and is described [Togunov et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.13681?casa_token=HUtNFmKXPR0AAAAA:TS2JyPeTT-di6IqkI0aHQEuxxM0izJxK5sKHJ3hohDPVEg3YkA5vJm2O0yrU_17B9smw4UCZ-eY9ew) and [Togunov et al. (2022)](https://www.biorxiv.org/content/10.1101/2022.07.07.498143v1.abstract).
+In this section we will examine a basic BCRW where a narwhal moves parallel to the estimated direction of tidal currents, and a more complex example where they travel parallel to the nearest coastline. We will have to use `prepData` slightly differently this time and will use the `tracks_gps_crw` data for clarity (i.e., we will not void gaps).
+
+#### Basic BCRW
+As in the previous section, we must first project the data into WGS84:
+```{r project_gps_crw_4326, cashe = T}
+tracks_gps_crw_wgs84 <- tracks_gps_crw %>% 
+  st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
+  st_set_crs(2962) %>%  # specify projection of daat
+  st_transform(4326) %>%  # re-project data to a lat long
+  # define x and y and drop geometry
+  {mutate(., x = st_coordinates(.)[,"X"], 
+             y = st_coordinates(.)[,"Y"])} %>%
+  st_drop_geometry()
+```
+
+Second, we will use the `calc_earthtide` function to estimate the direction of tides, specifically, the eastward (`e_w_displacement`) and northward (`n_s_displacement`) components of tidal currents. Again, for brevity, we will only calculate the direction in the centre of Eclipse Sound ($79.7^\circ$ W, $72.6^\circ$N), as this package does not have the resolution to estimate variability among the different fjords at our scale. 
+```{r get_tideu_tidev, attr.source = ".numberLines", cache=TRUE}
+tracks_gps_crw_wgs84 <- tracks_gps_crw_wgs84 %>% 
+  group_by(ID) %>%  # group by narwhal ID as calc_earthtide assumes chronological data
+  mutate(tide_u = calc_earthtide(utc = time,
+                                method = "e_w_displacement",
+                                latitude = 72.6,
+                                longitude = -79.7)[,2],
+         tide_v = calc_earthtide(utc = time,
+                                method = "n_s_displacement",
+                                latitude = 72.6)[,2])
+```
+Next, we can calculate the tide direction using the `atan2` function. This calculates the direction as radians counter-clockwise from east.
+```{r calc_tide_dir, attr.source = ".numberLines"}
+tracks_gps_crw_wgs84 <- tracks_gps_crw_wgs84 %>% 
+  mutate(tide_dir = atan2(tide_v, tide_u))
+```
+
+Now, when we prep the data for `momuntuHMM`, we must specify that `"tide_dir"` is an angular covariate. Because turning angle is calculated as the angle between the step at time $t$ relative to the step at time $t-1$, for the angular covariate, `momentuHMM` will calculate the angle between the animal's step at time $t-1$ relative to the tides at time $t$.
+```{r prep_gps_crw_wgs84, attr.source = ".numberLines"}
+# prep data 
+prep_gps_crw_wgs84 <- tracks_gps_crw_wgs84 %>% 
+  as.data.frame() %>% 
+  prepData(type = "LL", angleCovs = "tide_dir")
+```
+As the location data is the same as the previous section, we can pull its step and angle to void large data gaps.
+```{r void_NA_prep_gps_crw_wgs84, attr.source = ".numberLines"}
+prep_gps_crw_wgs84[,c("step", "angle")] <- prep_tracks_gps_crw_NAgaps[,c("step", "angle")]
+```
+Before we fit the HMM, we can define the DM for turning angle. Here, I will specify the DM explicitly using pseudo-DMs.
+```{r define_angle_DM, attr.source = ".numberLines"}
+# define turning angle pseudo-DM
+                  # b1         b3 b4
+angleDM <- matrix(c(0,         0, 0,# mean 1 
+                    "tide_dir",0, 0,# mean 2
+                    0,         1, 0, # k 1
+                    0,         0, 1),# k 2
+                 byrow = T, nrow = nbState*2, 
+                 dimnames = list(c("mean_1","mean_2","k_1","k_2"),
+                                 c("mean_2:tide","k_1","k_2")))
+DM <- list(angle = angleDM)
+```
+In the above DM, we are effectively fixing the mean turning angle for state 1 to $0^\circ$ and stating that the mean direction of state 2 (travel) depends on the tide direction.
+
+Now, we will define the starting parameters for the model and fit the HMM. We must add two arguments to `fitHMM`. First, we must specify for which angular data streams we want to to estimate the mean turning angle using `estAngleMean`. Second, when we are including covariates on the turning angle mean, we should also set `circularAngleMean = T`. `circularAngleMean` will fit a special link function based on [Rivest et al. (2016)](https://rss.onlinelibrary.wiley.com/doi/pdf/10.1111/rssc.12124?casa_token=ABk2iWxpXjwAAAAA:aeQyQhMPO80TrT2fwQ8Zkus5byxa3hIrg-itGFQJw44oBzMq3MhiyR5d6kG4H4yazeHWKEEuIiZWxA):
+\begin{linenomath*} \begin{equation}  
+    \label{eq:BCRW.TAm}
+        \mu_{t}^{(\phi)} = \mathrm{atan2}(\alpha_{1} \sin \psi_t, 1 + \alpha_{1} \cos \psi_t) \\
+\end{equation}  \end{linenomath*}
+where $\psi_t \in (-\pi,\pi]$ is the observed angle of stimulus at $t$ relative to the movement bearing at $t-1$ and $\alpha_{1} \in (-\infty, \infty)$ is the bias coefficient in the direction $\psi_t$. In this model, when $\alpha_{1} = 0$, the model simplifies to a basic CRW with a turning angle mean centred at 0. However, as $\alpha_{1}$ increases (or becomes increasingly negative), the movement becomes increasingly governed by the stimulus (i.e., toward or away from the direction of stimulus) and less by directional persistence.
+
+```{r prep_fit_HMM_S2AngleTides, attr.source = ".numberLines", cache=TRUE}
+set.seed(1)
+# define starting values
+mu0 <- c(200, 500) # Mean step length 
+sigma0 <- c(150, 300) # SD of the step length
+angle0 <- 1  # mean 2 TA
+kappa0 <- c(0.1, 1) # TA concentration parameter (kappa)
+Par0 <- list(step = c(mu0, sigma0), angle = c(angle0,kappa0))
+
+# Fit HMM
+HMM_S2AngleTides <- fitHMM(prep_gps_crw_wgs84, nbState = nbState, dist = dist, Par0 = Par0, DM = DM, stateNames = stateNames, estAngleMean = list(angle = T), circularAngleMean = list(angle = T))
+
+# plot
+plot(HMM_S2AngleTides, ask = FALSE, plotCI = T, plotTracks = F)
+
+# show parameter estimates and confidence intervals
+HMM_S2AngleTides$CIbeta$angle[c("est", "lower", "upper")] %>%  # get estimate and CI
+  lapply(as.vector) %>%  # convert to vectors
+  do.call(cbind, .) %>%  # cbind into data.frame
+  data.frame(names = colnames(HMM_S2AngleTides$mle$angle), .) %>%  # add beta names
+  kable(digits = 3)  # output table
+```
+It is clear from the second plot, that the tidal direction estimated using the `earthtide` package does not explain much of observed turning angle given by the confidence intervals for `mean_2:tide` and the second plot. In the second figure, the x-axis represents the angle of tide relative to the previous step and the y-axis is the estimated turning angle. We see that when the tide angle is $0^\circ$, the expected mean turning angle is also $0^\circ$ (i.e., the tide is in the same direction as directional persistence and no turn is expected). Moving to the right, as the tide angle increases (i.e., rotates towards the left), the turning angle also increases (i.e., also turns towards the left). Conversely, as the tide angle decreases (i.e., right relative to the narwhal), the narwhal's turning angle also shifts to the right (negative values). However, thoughout the plot, the estimated turning angle always encompasses $0^\circ$, suggesting there is not a strong relationship. This result makes sense as the `earthtide` package does not accurately represent tides in the complex coastline of Eclipse Sound, where waterways are angled in various directions (e.g., NBI, MI, TaS, and PI).
+![Eclipse Sound map.](data/Eclipse_Sound_Map.jpg)
+#### Menotactic BCRW
+
+```{r eval=FALSE, include=FALSE, }
 head(prep_tracks_gps_crw_NAgaps)
 hist(prep_tracks_gps_crw_NAgaps$step)
 temp <- prep_tracks_gps_crw_NAgaps
@@ -1118,11 +1212,8 @@ temp %>%
   summarise(mu_step = mean(step, na.rm = T),
             sd_step = sd(step, na.rm = T)/sqrt(n())) %>% 
   plot()
-# install.packages("earthtide")
-library(earthtide)
 
 tide_hdisp<- calc_earthtide(utc = tms,
-                            do_predict = TRUE,
                             method = 'horizontal_displacement',
                             latitude = 52.3868,
                             longitude = 9.7144)
