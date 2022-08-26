@@ -33,8 +33,8 @@ Our main objectives are to handle some of the common data problems encountered w
 ## Loading the required packages
 
 First, we'll setup the workspace with required packages.
-
-```{r, message=FALSE, attr.source = ".numberLines", cache=TRUE}
+ 
+```{r import_libraries, message=FALSE, attr.source = ".numberLines"}
 library(momentuHMM)
 library(dplyr)
 library(tidyr)
@@ -52,6 +52,9 @@ library(mitools)
 library(doFuture)
 library(corrplot)  # Pearson's correlation matrix using cor()
 library(data.table)
+library(earthtide)
+library(knitr)
+library(terra)
 ```
 
 Please also set working directory to "Day2" of the HMM workshop:
@@ -240,7 +243,7 @@ points(st_coordinates(tracks_gps)[,"X"], st_coordinates(tracks_gps)[,"Y"], pch =
 
 Looks like it works. Let's try fitting an HMM to this. First, lets prepare the data using `prepData` and plot the data to estimate starting parameters.
 
-```{r linear_HMM_prep, attr.source = ".numberLines"}
+```{r linear_HMM_prep, attr.source = ".numberLines", cache=T}
 prep_gps_linear <- prepData(tracks_gps_linear, type = "UTM")
 
 plot(prep_gps_linear, ask = FALSE)
@@ -326,10 +329,9 @@ That's looking much better. It looks like state 1 represents a low-speed, high t
 
 In many instances, this model may be sufficient. However, the significant proportion of interpolated locations used to fit the model is likely to affect our results. For example, the large interpolated gaps are still relatively straightened out and a very consistent speed, and may skew the definition of state 2 in particular. Simply interpreting the results with this issue in mind can be adequate when we only have few interpolated locations. Below, we will explore more formal ways to address this problem, which can be particularly useful when we have very large numbers of interpolated locations.
 
-### Approach 2. Voiding data gaps
+### Approach 2. Voiding data gaps {#void_gaps}
 
 One strategy to address large data gaps is to void the data streams (i.e., step length and turning angle) during moderate/large interpolated gaps where we expect that the estimated movement has is largely independent of the observed data before or after the gap. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. In this case, I will void the data streams from locations predicting in gaps $>60$ min. First, we will identify which steps need to be voided, then we will prepare the data and void the estimated `step` and `angle` data streams. We will do this again later in the tutorial, so we will wrap it into a function called `prepData_NAGaps`.
-
 
 ```{r id_void_gaps, attr.source = ".numberLines"}
 # define function to replace step and turn angle of large gaps with NA
@@ -646,7 +648,7 @@ plotTDR(dive_TDR_calib[[1]], diveNo = 1:300, surface = TRUE)
 
 Now, we can calculate summary statistics for each dive using the function `diveStats`. There are many dive metrics that are estimated, and which ones to retain are species, data, and question specific. In this case, we will retain 8 from those calculated by `diveStats`: dive time, bottom time,  maximum depth, bottom distance (measure of "wiggling while at the bottom), post-dive duration.
 
-```{r calc-summary_dive_stats, attr.source = ".numberLines"}
+```{r calc-summary_dive_stats, attr.source = ".numberLines", cache=T}
 # calculate dive stats and add dive.id to each dive 
 dive_sum <- lapply(dive_TDR_calib, function(data){
   mutate(diveStats(data, depth.deriv = FALSE), dive.id = row_number()) %>% 
@@ -725,7 +727,7 @@ I will also add a subjective score based on the results (first number after `#` 
 
 <!-- MAM: break down this chunk and add explanations for each bits -->
 
-```{r data_structure, attr.source = ".numberLines"}
+```{r data_structure, attr.source = ".numberLines", cache=T}
 vars <- c("mean_dep","max_dep","dive_t","bott_t","prop_bott",
           "max_dive_dep","bott_dist","post_dive_dur")
 # First, missing data
@@ -853,7 +855,7 @@ HMM_move_dive <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, 
 ```
 
 Let's see what it looks like.
-```{r view_HMM_move_dive, attr.source = ".numberLines"}
+```{r view_HMM_move_dive, attr.source = ".numberLines", cache = T}
 plot(HMM_move_dive, breaks = 100, ask = FALSE)
 plotPR(HMM_move_dive)
 ```
@@ -892,7 +894,7 @@ set.seed(1)
 HMM_move_dive_3s <- fitHMM(tracks_dives, nbStates=nbStates, stateNames=stateNames, dist=dist, Par0=Par0)
 ```
 
-```{r review_3_state_HMM, attr.source = ".numberLines"}
+```{r review_3_state_HMM, attr.source = ".numberLines", cache=T}
 plotPR(HMM_move_dive_3s)
 plot(HMM_move_dive_3s, breaks = 100, ask = FALSE)
 ```
@@ -933,6 +935,433 @@ The QQ-plot for `step` is quite a bit improved, as is for `bott_dist`. The ACF f
 ```{r HMM state AIC, attr.source = ".numberLines"}
 AIC(HMM_move_dive, HMM_move_dive_3s, HMM_move_dive_4s)
 ```
+
+## Covariates on emission probabilities
+
+Thus far, we discussed various methods to regularise your data if you have missing locations and calculating and integrating dive metrics into HMMs, and in yesterday's tutorial we discussed incorporating covariates on the state transition probability. `momentuHMM` also provides the option to include covariates on the emission probability, that is, the distribution parameters (e.g., step length mean or sd) could depend on covariates. For example, we may predict that the apparent swim speed (e.g., mean step length) may depend on ocean current speed. This section will show how to integrate covariates into the emission probabilities for mean step length and mean turning angle.
+
+### Covariates on step length emission probability
+This section will illustrate how to model narwhal step length as a function of tidal currents. The narwhals in this tutorial primarily occupy the Eclipse sound system, where incoming tides lead to tidal currents into the fjords, and outgoing tides lead to tidal currents out of the fjords. Unfortunately, there is high resolution measurement data or modelled data of tidal currents in this system. However, there are general models based on lunar and solar cycles and broad-scale coast lines that we can use for the purposes of this tutorial. Specifically, we will use the `calc_earthtide` function from the `earthtide` package to estimate horizontal displacement; as the model does not take into account coastlines, the specific direction of tides cannot be used, but general patterns of still water or tide-driven currents should hold. For this section, we will use the CRW data with voided gaps. First, we must project the data into lat long (WGS84).
+```{r project_tracks_crw_to_WGS84, attr.source = ".numberLines", cache=TRUE}
+# re-project crw data to WGS84
+prep_tracks_gps_crw_NAgaps_wgs84 <- 
+  prep_tracks_gps_crw_NAgaps %>% 
+  as.data.frame() %>%  # convert from momentuHMM object to data frame
+  st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
+  st_set_crs(2962) %>%  # specify projection of daat
+  st_transform(4326) # re-project data to a lat long
+
+# define x and y colums and remove sf geometry
+prep_tracks_gps_crw_NAgaps_wgs84 <- prep_tracks_gps_crw_NAgaps_wgs84 %>% 
+  mutate(x = st_coordinates(prep_tracks_gps_crw_NAgaps_wgs84)[,"X"], 
+         y = st_coordinates(prep_tracks_gps_crw_NAgaps_wgs84)[,"Y"]) %>%
+  st_drop_geometry()
+```
+
+At the small scale we are using, there is not much spatial variation in the tides, so for faster processing, we can just estimate tidal currents at each narwhal time step using the coordinates for the centre of Eclipse sound ($79.7^\circ$ W, $72.6^\circ$N).
+```{r get_htide, attr.source = ".numberLines", cache=TRUE}
+prep_tracks_gps_crw_NAgaps_wgs84 <- prep_tracks_gps_crw_NAgaps_wgs84 %>% 
+  group_by(ID) %>%  # group by narwhal ID as calc_earthtide assumes chronological data
+  mutate(htide = calc_earthtide(utc = time,
+                                do_predict = TRUE,
+                                method = 'horizontal_displacement',
+                                latitude = 72.6,
+                                longitude = -79.7)[,2]) 
+# invert the horizontal_displacement so values are strictly positive (I'm not sure what the units for this variable are)
+prep_tracks_gps_crw_NAgaps$htide <- -prep_tracks_gps_crw_NAgaps_wgs84$htide + 10 
+
+# plot tide data as afunction of time
+plot(htide ~ time, prep_tracks_gps_crw_NAgaps, type = 'l')
+```
+
+If narwhal movement occurred at a larger scale (e.g., if we studied a longer period), and we wanted to estimate tidal currents independently for each location, we could use the following code (not run):
+
+```{r get_htide_rowwise, attr.source = ".numberLines", eval=F}
+prep_tracks_gps_crw_NAgaps_wgs84 <- prep_tracks_gps_crw_NAgaps_wgs84 %>%
+  rowwise() %>%  # must apply calc_earthtide function independently to each row
+  mutate(htide = calc_earthtide(utc = time,
+                                method = 'horizontal_displacement',
+                                latitude = y,  # use x,y coordinates from each row
+                                longitude = x)[,2]) %>%
+  ungroup()  # ungroup data so future analysis is not conducted rowwise
+```
+
+Next, we can define the model structure including the design matrix, which can be used to specify effects of covariates.
+Note: when specifying a design matrix with DM, starting parameters (i.e., Par0) must be specified on the working scale (i.e., -inf,inf), therefore, we apply a log transformation for the mean and sd for step.
+```{r prep_HMM_StepTides, message=FALSE, attr.source = ".numberLines", cache=TRUE}
+set.seed(1)
+# define state names (optional)
+stateNames <- c("resident", "travel")
+# define number of states
+nbState <- length(stateNames)
+
+# define distributions for each data stream
+dist <- list(step = "gamma", angle = "vm")
+
+# define step formula and design matrix
+stepDM <- list(mean = ~ htide, sd = ~ 1)
+DM <- list(step = stepDM)
+
+# define starting values
+mu0 <- log(c(200, 1,  # state 1 step mean: intercept + slope (working scale)
+             500, 1)) # state 2 step mean: intercept + slope (working scale)
+sigma0 <- log(c(150, 300)) # SD of the step length (working scale)
+kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
+Par0 <- list(step = c(mu0, sigma0), angle = kappa0)
+```
+
+Now we can fit the HMM, plot the output, and view the estimated parameters with confidence intervals. Note, when the model has covariates, you can include `plotCI = T` to include the 95% confidence intervals on the estimated value.
+```{r fit_HMM_StepTides, message=FALSE, attr.source = ".numberLines", cache=TRUE}
+# Fit a 2 state HMM
+HMM_StepTides <- fitHMM(prep_tracks_gps_crw_NAgaps, nbState = nbState, dist = dist, Par0 = Par0, DM = DM, stateNames = stateNames)
+
+# plot
+plot(HMM_StepTides, ask = FALSE, plotCI = T)
+
+# show parameter estimates and confidence intervals
+HMM_StepTides$CIbeta$step[c("est", "lower", "upper")] %>%  # get estimate and CI
+  lapply(as.vector) %>%  # convert est, lower, and upper to vectors
+  do.call(cbind, .) %>%  # cbind est, lower, and upper into a data.frame
+  data.frame(names = colnames(HMM_StepTides$mle$step), .) %>%  # add column for beta names
+  kable(digits = 3)  # output table with 3 decimal places on values
+```
+Based on the first plot and the negative and positive confidence intervals for `mean_1:htide`, it does not appear there is a relationship between tidal currents and speed for the resident state. However, there may be a positive relationship with speed for the travelling state. These results align with the prediction that narwhal movement is random relative to tides during the resident state and that movement tends to be with tidal current during the travelling state to save energy. `momentuHMM` has special functions that allow us to specify state-specific effects of covariates, namely: `state`, `toState`, and `betaCol`. Using `state2(htide)` in the DM for step length, we specify that tidal currents only affect the travelling state (state 2) as follows: 
+
+```{r prep_fit_HMM_S2StepTides, message=FALSE, attr.source = ".numberLines", cache=TRUE}
+set.seed(1)
+# define starting values
+mu0 <- log(c(200, 500, 1)) # Mean step length (working scale)
+sigma0 <- log(c(150, 300)) # Sd of the step length (working scale)
+kappa0 <- c(0.1, 1) # Turning angle concentration parameter (kappa > 0)
+Par0 <- list(step = c(mu0, sigma0), angle = kappa0)
+
+# define formula. 
+# state 2 mean is a function of htide
+stepDM <- list(mean = ~ state2(htide), sd = ~ 1)
+DM <- list(step = stepDM)
+
+# Fit HMM
+HMM_S2StepTides <- fitHMM(prep_tracks_gps_crw_NAgaps, nbState = nbState, dist = dist, Par0 = Par0, DM = DM, stateNames = stateNames)
+
+# plot
+plot(HMM_S2StepTides, ask = FALSE, plotCI = T, plotTracks = F)
+
+# show parameter estimates and confidence intervals
+HMM_S2StepTides$CIbeta$step[c("est", "lower", "upper")] %>%  # get estimate and CI
+  lapply(as.vector) %>%  # convert to vectors
+  do.call(cbind, .) %>%  # cbind into data.frame
+  data.frame(names = colnames(HMM_S2StepTides$mle$step), .) %>%  # add beta names
+  kable(digits = 3)  # output table
+```
+Here we see that tidal effects do appear to affect step length in state 2. As the observation data is the same between this model and the model in section \@ref(void_gaps), we can use AIC to compare models with and without tidal data. 
+```{r AIC_htides_HMMs, attr.source = ".numberLines"}
+AIC(HMM_gps_crw_NAgaps)  # without tide data
+AIC(HMM_StepTides)  # tidal effects on state 1 and state 2 step length
+AIC(HMM_S2StepTides)  # tidal effects on state 2 step length
+```
+In this case, the original model without tidal effects had the best AIC, suggesting that including tides did not explain enough additional variation to warrant the additional parameter. 
+
+For me, using the special functions (i.e.,, `state` and `toState`, and `betaCol`) can get confusing. Instead, I prefer to define pseudo-DMs explicitly so I know exactly how each parameter is defined. The previous HMM can be identically defined using the following code (we will not run this):
+```{r DM_HMM_S2StepTides, eval=FALSE, attr.source = ".numberLines"}
+# define pseudo-design matrix
+                 # b1 b2 b3      b4 b5
+stepDM <- matrix(c(1, 0, 0,      0, 0, # mean 1 (intercept-only)
+                   0, 1, "htide",0, 0, # mean 2 (intercept + slope*htide)
+                   0, 0, 0,      1, 0, # sd 1 (intercept-only)
+                   0, 0, 0,      0, 1),# sd 2 (intercept-only)
+                 byrow = T, nrow = nbState*2, 
+                 dimnames = list(c("mean_1","mean_2","sd_1","sd_2"),
+                                 c("mean_1", "mean_2:int", "mean_2:htide", "sd_1", "sd_2")))
+DM <- list(step = stepDM)
+# fit HMM as in previous code chunk
+```
+Note: adding dimension names is optional, but can help with interpretation. Remember, each row of the DM corresponds with the state-specific distribution parameters and each column represents the beta coefficients estimated by the model. A basic HMM without any covariates is effectively using a diagonal matrix of 1s. Multiple values in one row are added multiplied by their respective beta coefficients then transformed using the link function (in this case, log for mean and SD). Mathematically, the above DM can be written as follows:
+\begin{equation} \label{eq:sl}
+  \begin{aligned}
+      \log\mu_{S,t}^{(l)} &= 
+        \begin{cases}
+             \begin{aligned}
+             & \beta_{1} \\
+             & \beta_{2} + \beta_{3}r^{(\mathrm{htide})}_t \\
+             \end{aligned}
+        \end{cases}
+        \quad
+        \begin{aligned}
+        & \mathrm{if} \: S = \mathrm{resident}\\
+        & \mathrm{if} \: S = \mathrm{travel}\\
+        \end{aligned} \\
+      \log\sigma_{S,t}^{(l)} &= 
+        \begin{cases}
+             \begin{aligned}
+             & \beta_{3} \\
+             & \beta_{4} \\
+             \end{aligned}
+        \end{cases}
+        \quad
+        \begin{aligned}
+        & \mathrm{if} \: S = \mathrm{resident}\\
+        & \mathrm{if} \: S = \mathrm{travel},\\
+        \end{aligned}
+  \end{aligned}
+\end{equation}  
+where $\mu_S^{(l)}$ is the state-specific mean of step length, $\sigma_{S}^{(l)}$ is the state-specific SD of step length, $\beta \in (-\infty, \infty)$ are the beta coefficients estimated by the model, and $r^{(htide)}_t$ is the rate of horizontal tide movement at time $t$.
+
+### Covariates on turning angle emission probability
+ It is possible to include covariates on every any data stream including turning angle. Thus far, we have been assuming that all movement tends to have directional persistence such that the mean turning angle in every state is $\mu_S^{(\phi)} = 0$ and the angular concentration is state specific (i.e., $\kappa_S{(\phi)}$ is state-specific). If we want to include covariates on $\kappa$, we can do so as in the previous section. To include covariates on the mean turning angle $\mu_S^{(\phi)}$, we must also add `circularAngleMean = TRUE` in `fitHMM` and also include additional starting parameters for angle (thus far we have only been specifying starting parameters for $\kappa_S$). 
+When no covariates are included on the mean turning angle, we are effectively describing the movement as a correlated random walk (CRW), wherein the only factor that determines the direction an animal moves is directional persistence (i.e., tending to move forward in the same direction). However, most behaviours exhibit some directional bias relative to the external stimuli. For example, when travelling, narwhals may orient themselves in the same direction as currents to save energy, or if killer whales are present on a large scale (e.g., within 100 km) they may orient themselves toward shore as suggested by [Breed et al. (2017)](https://www.pnas.org/doi/abs/10.1073/pnas.1611707114), or if killer whales are very near, they may orient their movement directly away from killer whales. Movement where orientation is a combination of correlated directional persistence and bias relative to external stimuli is known as a biased correlated random walk (BCRW). Many interesting hypotheses can be tested by including covariates on the mean turning angle. Directional bias can be directly toward or away from a stimulus (e.g., resource patch, or predator location) or it may be at some angle relative to the stimulus (e.g., bird flight $45^\circ$ relative to wind to maximise ground speed, polar bear crosswind movement during olfactory search, or sea turtle navigation relative to magnetic fields). Movement with an angled bias is known as \textit{menotaxis} and was the focus of my PhD and is described [Togunov et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.13681?casa_token=HUtNFmKXPR0AAAAA:TS2JyPeTT-di6IqkI0aHQEuxxM0izJxK5sKHJ3hohDPVEg3YkA5vJm2O0yrU_17B9smw4UCZ-eY9ew) and [Togunov et al. (2022)](https://www.biorxiv.org/content/10.1101/2022.07.07.498143v1.abstract).
+In this section we will examine a basic BCRW where a narwhal moves parallel to the estimated direction of tidal currents, and a more complex example where they travel parallel to the nearest coastline. We will have to use `prepData` slightly differently this time and will use the `tracks_gps_crw` data for clarity (i.e., we will not void gaps).
+
+#### Basic BCRW
+As in the previous section, we must first project the data into WGS84:
+```{r project_gps_crw_4326, cashe = T}
+tracks_gps_crw_wgs84 <- tracks_gps_crw %>% 
+  st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
+  st_set_crs(2962) %>%  # specify projection of daat
+  st_transform(4326) 
+```
+
+Second, we will use the `calc_earthtide` function to estimate the direction of tides, specifically, the eastward (`e_w_displacement`) and northward (`n_s_displacement`) components of tidal currents. Again, for brevity, we will only calculate the direction in the centre of Eclipse Sound ($79.7^\circ$ W, $72.6^\circ$N), as this package does not have the resolution to estimate variability among the different fjords at our scale. 
+```{r get_tideu_tidev, attr.source = ".numberLines", cache=TRUE}
+tracks_gps_crw_wgs84 <- tracks_gps_crw_wgs84 %>% 
+  group_by(ID) %>%  # group by narwhal ID as calc_earthtide assumes chronological data
+  mutate(tide_u = calc_earthtide(utc = time,
+                                method = "e_w_displacement",
+                                latitude = 72.6,
+                                longitude = -79.7)[,2],
+         tide_v = calc_earthtide(utc = time,
+                                method = "n_s_displacement",
+                                latitude = 72.6)[,2]) %>% 
+  ungroup()
+
+# convert back to EPSG2962
+tracks_gps_crw_wgs84 <- tracks_gps_crw_wgs84 %>% 
+  st_transform(2962) %>%  # re-project data to a lat long
+  # define x and y and drop geometry
+  {mutate(., x = st_coordinates(.)[,"X"], 
+             y = st_coordinates(.)[,"Y"])} %>%
+  st_drop_geometry()
+```
+Next, we can calculate the tide direction using the `atan2` function. This calculates the direction as radians counter-clockwise from east.
+```{r calc_tide_dir, attr.source = ".numberLines"}
+tracks_gps_crw_wgs84 <- tracks_gps_crw_wgs84 %>% 
+  mutate(tide_dir = atan2(tide_v, tide_u))
+```
+
+Now, when we prep the data for `momuntuHMM`, we must specify that `"tide_dir"` is an angular covariate. Because turning angle is calculated as the angle between the step at time $t$ relative to the step at time $t-1$, for the angular covariate, `momentuHMM` will calculate the angle between the animal's step at time $t-1$ relative to the tides at time $t$.
+```{r prep_gps_crw_wgs84, attr.source = ".numberLines"}
+# prep data 
+prep_gps_crw_wgs84 <- tracks_gps_crw_wgs84 %>% 
+  as.data.frame() %>% 
+  prepData(type = "UTM", angleCovs = "tide_dir")
+```
+As the location data is the same as the previous section, we can pull its step and angle to void large data gaps.
+```{r void_NA_prep_gps_crw_wgs84, attr.source = ".numberLines"}
+prep_gps_crw_wgs84[,c("step", "angle")] <- prep_tracks_gps_crw_NAgaps[,c("step", "angle")]
+```
+Before we fit the HMM, we can define the DM for turning angle. Here, I will specify the DM explicitly using pseudo-DMs.
+```{r define_angle_DM, attr.source = ".numberLines"}
+# define turning angle pseudo-DM
+                  # b1         b2 b3
+angleDM <- matrix(c(0,         0, 0,# mean 1 
+                    "tide_dir",0, 0,# mean 2
+                    0,         1, 0, # k 1
+                    0,         0, 1),# k 2
+                 byrow = T, nrow = nbState*2, 
+                 dimnames = list(c("mean_1","mean_2","k_1","k_2"),
+                                 c("mean_2:tide","k_1","k_2")))
+DM <- list(angle = angleDM)
+```
+In the above DM, we are effectively fixing the mean turning angle for state 1 to $0^\circ$ and stating that the mean direction of state 2 (travel) depends on the tide direction.
+
+Now, we will define the starting parameters for the model and fit the HMM. We must add two arguments to `fitHMM`. First, we must specify for which angular data streams we want to to estimate the mean turning angle using `estAngleMean`. Second, when we are including covariates on the turning angle mean, we should also set `circularAngleMean = T`. `circularAngleMean` will fit a special link function based on [Rivest et al. (2016)](https://rss.onlinelibrary.wiley.com/doi/pdf/10.1111/rssc.12124?casa_token=ABk2iWxpXjwAAAAA:aeQyQhMPO80TrT2fwQ8Zkus5byxa3hIrg-itGFQJw44oBzMq3MhiyR5d6kG4H4yazeHWKEEuIiZWxA):
+\begin{linenomath*} \begin{equation}  
+    \label{eq:BCRW.TAm}
+        \mu_{t}^{(\phi)} = \mathrm{atan2}(\alpha_{1} \sin \psi_t, 1 + \alpha_{1} \cos \psi_t) \\
+\end{equation}  \end{linenomath*}
+where $\psi_t \in (-\pi,\pi]$ is the observed angle of stimulus at $t$ relative to the movement bearing at $t-1$ and $\alpha_{1} \in (-\infty, \infty)$ is the bias coefficient in the direction $\psi_t$. In this model, when $\alpha_{1} = 0$, the model simplifies to a basic CRW with a turning angle mean centred at 0. However, as $\alpha_{1}$ increases (or becomes increasingly negative), the movement becomes increasingly governed by the stimulus (i.e., toward or away from the direction of stimulus) and less by directional persistence.
+
+```{r prep_fit_HMM_S2AngleTides, attr.source = ".numberLines", cache=TRUE}
+set.seed(1)
+# define starting values
+mu0 <- c(200, 500) # Mean step length 
+sigma0 <- c(150, 300) # SD of the step length
+angle0 <- 1  # mean 2 TA
+kappa0 <- c(0.1, 1) # TA concentration parameter (kappa)
+Par0 <- list(step = c(mu0, sigma0), angle = c(angle0,kappa0))
+
+# Fit HMM
+HMM_S2AngleTides <- fitHMM(prep_gps_crw_wgs84, nbState = nbState, dist = dist, Par0 = Par0, DM = DM, stateNames = stateNames, estAngleMean = list(angle = T), circularAngleMean = list(angle = T))
+
+# plot
+plot(HMM_S2AngleTides, ask = FALSE, plotCI = T, plotTracks = F)
+
+# show parameter estimates and confidence intervals
+HMM_S2AngleTides$CIbeta$angle[c("est", "lower", "upper")] %>%  # get estimate and CI
+  lapply(as.vector) %>%  # convert to vectors
+  do.call(cbind, .) %>%  # cbind into data.frame
+  data.frame(names = colnames(HMM_S2AngleTides$mle$angle), .) %>%  # add beta names
+  kable(digits = 3)  # output table
+```
+It is clear from the second plot, that the tidal direction estimated using the `earthtide` package does not explain much of observed turning angle given by the confidence intervals for `mean_2:tide` and the second plot. In the second figure, the x-axis represents the angle of tide relative to the previous step and the y-axis is the estimated turning angle. We see that when the tide angle is $0^\circ$, the expected mean turning angle is also $0^\circ$ (i.e., the tide is in the same direction as directional persistence and no turn is expected). Moving to the right, as the tide angle increases (i.e., rotates towards the left), the turning angle also increases (i.e., also turns towards the left). Conversely, as the tide angle decreases (i.e., right relative to the narwhal), the narwhal's turning angle also shifts to the right (negative values). However, thoughout the plot, the estimated turning angle always encompasses $0^\circ$, suggesting there is not a strong relationship. This result makes sense as the `earthtide` package does not accurately represent tides in the complex coastline of Eclipse Sound, where waterways are angled in various directions (e.g., NBI, MI, TaS, and PI).
+![Eclipse Sound map.](data/Eclipse_Sound_Map.jpg)
+#### Menotactic BCRW
+Our hypothesis is that when travelling, narwhal's movement is parallel to the coastline. In the context of a BCRW, we can model this by defining turning angle as a function of the direction of the nearest coastline. We can obtain the direction of the nearest coastline using the `direction` function from the `terra` package, and the angle of the coast line is perpendicular to this direction.
+```{r get_land_dir, attr.source = ".numberLines", cache=TRUE}
+land <- vect("data/land.shp") # import land polygon shapefile (project if necessary)
+plot(land)
+range(tracks_gps_crw$x)
+range(tracks_gps_crw$y)
+r <- rast(ext(-320000, -150000, 8140000, 8250000),  # define extent
+          resolution = 100, crs = "epsg:2962")  # define res and CRS
+
+land_rast <- rasterize(land, r)  # rasterise land layer to defined raster
+plot(land_rast)
+
+land_dir <- direction(land_rast)  # calculate direction of each water cell to nearest land cell
+plot(land_dir)
+# clockwise relative to vertical will have to invert and rotate
+
+# invert and rotate clockwise by pi/2
+land_dir <- -1*land_dir+pi/2  
+# use ifelse for SpatRasters to add 2*pi to cells less than -pi
+land_dir <- ifel(land_dir <= -pi,  land_dir+2*pi, land_dir)
+plot(land_dir)
+
+# convert track to spatVector
+tracks_gps_crw_vect <- tracks_gps_crw_wgs84 %>% 
+  as.data.frame() %>% 
+  vect(geom = c("x", "y"), crs = "epsg:2962")
+
+# extract dir to nearest land cell
+tracks_gps_crw_wgs84$land_dir <- extract(land_dir, tracks_gps_crw_vect)[,"layer"]
+```
+
+Specifically, when in the travelling state, the narwhal turning angle is biased toward $\pm90^/circ$ relative to the direction to the nearest coastline. The main challenge in implementing this model is that there are two ways to move parallel relative to the coastline: up the coastline and down the coastline. For a given angular covariate, `momentuHMM` allows us to model angular bias toward/away one angle (i.e., either $+90^/circ$ or $-90^/circ$). To include two possible directions, we have to use a trick where we divide the one behaviour into two states with their own respective biases. In this case, we will divide the travelling state into travelling left (`"travel_L"`) and travelling right (`"travel_R"`) of the direction to the nearest coastline.
+
+```{r define_landHMM_states, attr.source = ".numberLines"}
+# define model
+stateNames <- c("resident", "travel_L", "travel_R")
+nbState <- length(stateNames)
+
+# define distributions for each data stream
+dist <- list(step = "gamma", angle = "vm")
+```
+
+Prep data 
+<!--  to the nearest coastline . -->
+```{r prep_landHMM_data, attr.source = ".numberLines"}
+# prep data
+prep_gps_crw_wgs84 <-  tracks_gps_crw_wgs84 %>% 
+  as.data.frame() %>% 
+  prepData(type = "UTM", angleCovs = "land_dir") 
+```
+
+The warning message is because some locations were so close to land in reality, they fell on a cell defined as land and where there is no applicable "direction to nearest land cell". It may also occur if the interpolated locations occur on land. In cases with missing covariate data, `momentuHMM` will replace the NA with the closest available value, which should be good enough for our purposes.  
+
+As the location data is the same as the previous section, we can pull its step and angle to void large data gaps.
+```{r void_NA_landHMM_data, attr.source = ".numberLines"}
+prep_gps_crw_wgs84[,c("step", "angle")] <- prep_tracks_gps_crw_NAgaps[,c("step", "angle")]
+```
+
+Next, we must define the pseudo-DM, where `travel_L` is biased toward `land_dir + pi/2` and `travel_R` is biased toward `land_dir - pi/2`. In formula notation, when we want to execute a mathematical operation as written, we must use R`s function `I` (see `help("I")` for details). Second, because `"travel_L"` and `"travel_R"` represent the same biological behaviour which should have the same parameters, we can include their arguments in the same columns in the pseudo-DM. 
+```{r landHMM_angleDM, attr.source = ".numberLines"}
+# define turning angle pseudo-DM
+                  # b1                     b2 b3
+angleDM <- matrix(c(0,                     0, 0,# mean resident
+                    "I(land_dir + 3.14/2)",0, 0,# mean travel_L
+                    "I(land_dir - 3.14/2)",0, 0,# mean travel_R
+                    0,                     1, 0, # k resident
+                    0,                     0, 1, # k travel_L
+                    0,                     0, 1),# k travel_R
+                 byrow = T, nrow = nbState*2, 
+                 dimnames = list(c("mean_R","mean_TL","mean_TR", "k_R","k_TL","k_TR"),
+                                 c("mean_T:land","k_R","k_T")))
+```
+In the above pseudo-DM, the coefficients `"mean_T:land"` and `"k_T"` will be shared between `"travel_L"` and `"travel_R"` as the rows are identical. 
+To remove additional parameters, we will also specify the pseudo-DM for the step length with shared parameters for the travel states.
+```{r landHMM_stepDM, attr.source = ".numberLines"}
+# define turning angle pseudo-DM
+                  # b1 b2 b3 b4
+stepDM <- matrix(c(1, 0, 0, 0,# mean resident
+                    0, 1, 0, 0,# mean travel_L
+                    0, 1, 0, 0,# mean travel_R
+                    0, 0, 1, 0, # sd resident
+                    0, 0, 0, 1, # sd travel_L
+                    0, 0, 0, 1),# sd travel_R
+                 byrow = T, nrow = nbState*2, 
+                 dimnames = list(c("mean_R","mean_TL","mean_TR", "sd_R","sd_TL","sd_TR"),
+                                 c("mean_R","mean_T", "sd_R","sd_T")))
+# combine DMs
+DM <- list(step = stepDM, angle = angleDM)
+```
+
+We can also share the transition probabilities to and from the travel states using the beta constraints (`betaCons`) argument in the `fitHMM` function. `betaCons` is a matrix representing the off-diagonal elements of the state transition probability matrix (i.e., not including the probabilities of remaining in the same state). The values of the matrix must be integers identifying any equality constraints (identical integers), wherein the integer must represent the lowest index of constrained values (see `betaCons` details in `help("fitHMM")`).
+```{r landHMM_betaCons, attr.source = ".numberLines"}
+              # To:  R,TL,TR
+betaCons <- matrix(c(   1, 1,  # from R
+                     3,    4,  # from TL
+                     3, 4   ), # from TR
+                   nrow = 1, byrow = T)
+```
+In the above code, we left the diagonal values (remaining in the same state) empty for visual clarity. The two 1s convey that the transition from R to either TL or TR is the same. No index of "2" (from R to TR) is used as it is constrained to index "1". The 3s convey that the probabilities of transitioning from TL to R or TR to R are the same. Last, the 4s convey that the probability of transitioning from TL to TR is the same as from TR to TL.
+
+Now we can specify the starting parameters and fit the HMM.
+```{r fit_landHMM, attr.source = ".numberLines", cache=TRUE}
+set.seed(1)
+# define starting values
+mu0 <- log(c(200, 500)) # SL mean (500 shared by TL and TR)
+sigma0 <- log(c(150, 300)) # SL sd (300 shared by TL and TR)
+angle0 <- 5  # TA mean
+kappa0 <- log(c(0.1, 1)) # TA kappa (1 shared by TL and TR)
+Par0 <- list(step = c(mu0, sigma0), angle = c(angle0,kappa0))
+
+# Fit HMM
+HMM_AngleLand <- fitHMM(prep_gps_crw_wgs84, nbState = nbState, dist = dist, Par0 = Par0, DM = DM, stateNames = stateNames, estAngleMean = list(angle = T), circularAngleMean = list(angle = T), betaCons = betaCons)
+
+# plot
+plot(HMM_AngleLand, ask = FALSE, plotCI = T, plotTracks = F)
+
+# show parameter estimates and confidence intervals
+HMM_AngleLand$CIbeta$angle[c("est", "lower", "upper")] %>%  # get estimate and CI
+  lapply(as.vector) %>%  # convert to vectors
+  do.call(cbind, .) %>%  # cbind into data.frame
+  data.frame(names = colnames(HMM_AngleLand$mle$angle), .) %>%  # add beta names
+  kable(digits = 3)  # output table
+```
+Given the confidence intervals to not include 0, it appears that at least some of narwhal orientation during travel is governed by the direction of the coastline. 
+We can map these states with the coastline using `tmap`. For clarity, we will filter one individual. 
+```{r plot_landHMM, attr.source = ".numberLines"}
+# identify most likely state using the Viterbi algorithm
+prep_gps_crw_wgs84$state <- viterbi(HMM_AngleLand)
+
+# convert to SF object
+prep_gps_crw_sf_sub <- prep_gps_crw_wgs84 %>% 
+  filter(ID == "T172066") %>% 
+  st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
+  st_set_crs(2962)
+
+# plot with tmap
+tm_shape(prep_gps_crw_sf_sub) + 
+  tm_dots(col = "state", palette = c("brown", "dodgerblue", "darkblue"), size = 0.1) + 
+  tm_shape(st_as_sf(land)) + 
+  tm_polygons()
+```
+#### Bonus
+If the animal is presumed to move at some angle other than $0^\circ$, $180^\circ$, or $\pm90^\circ$ that is not known a priori, we can allow the model to estimate the angle of bias by defining animal movement as a trade-off between directional persistence, bias in the same direction as the stimulus, and bias perpendicular to the stimulus. For example, if we thought narwhals moved at some unknown angle relative to the direction of the tides, the pseudo-DM could be formatted as follows:
+```{r menotaxis_DM, eval=FALSE, attr.source = ".numberLines"}
+# define turning angle pseudo-DM
+                  # b1      b2                 b3 b4
+angleDM <- matrix(c(0,      0,                 0, 0,# mean resident
+                    "tide", "I(tide + 3.14/2)",0, 0,# mean travel_L
+                    "tide", "I(tide - 3.14/2)",0, 0,# mean travel_R
+                    0,      0,                 1, 0, # k resident
+                    0,      0,                 0, 1, # k travel_L
+                    0,      0,                 0, 1),# k travel_R
+                 byrow = T, nrow = nbState*2, 
+                 dimnames = list(c("mean_R","mean_TL","mean_TR", "k_R","k_TL","k_TR"), c("mean_T:tide","mean_T:tide90","k_R","k_T")))
+```
+After the model is fit and the beta coefficients are estimated, the angle of attraction can be calculated using `atan2(b2, b1)`. See [Togunov et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.13681?casa_token=HUtNFmKXPR0AAAAA:TS2JyPeTT-di6IqkI0aHQEuxxM0izJxK5sKHJ3hohDPVEg3YkA5vJm2O0yrU_17B9smw4UCZ-eY9ew) and [Togunov et al. (2022)](https://www.biorxiv.org/content/10.1101/2022.07.07.498143v1.abstract) for details.
+
 
 <!-- ## play -->
 <!-- ```{r} -->
@@ -1721,7 +2150,8 @@ Argos data section - for now removed. We could do an extra tutorial.
 <!--   predTime = predTime) -->
 <!-- gpsFits <- MIfitHMM(gps_45_crwOut, nSims = 1, fit = F) -->
 <!-- ``` -->
-## Modelling emission probabilities
+
+
 ## Bonus 
 <!-- ### Dealing with location error and irregular time -->
 <!-- Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series. -->
