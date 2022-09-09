@@ -440,39 +440,42 @@ be easily installed or updated via CRAN (using install.packages()):</p>
 <li>momentuHMM</li>
 <li>dplyr</li>
 <li>tidyr</li>
-<li>lubridate</li>
-<li>adehabitatLT</li>
-<li>tmap</li>
-<li>units</li>
 <li>stringr</li>
+<li>data.table</li>
+<li>lubridate</li>
+<li>units</li>
 <li>diveMove</li>
+<li>earthtide</li>
+<li>corrplot</li>
 <li>conicfit</li>
 <li>car</li>
 <li>mitools</li>
 <li>doFuture</li>
-<li>corrplot</li>
+<li>kableExtra</li>
 </ul>
 </div>
 <div id="check-that-all-packages-are-installed" class="section level3">
 <h3>Check that all packages are installed</h3>
 <p>Once all the packages are installed, you can check that they are
 properly installed by loading them.</p>
-<pre class="r"><code>library(sf)
-library(terra)
-library(tmap)
-library(momentuHMM)
-library(dplyr)
-library(tidyr)
-library(lubridate)
-library(adehabitatLT)
-library(units)
-library(stringr)
-library(diveMove)
-library(conicfit)
-library(car)
-library(mitools)
-library(doFuture)
-library(corrplot)</code></pre>
+<pre class="r"><code>library(sf)        # spatial data processing
+library(terra)     # raster data processing
+library(tmap)      # mapping spatial data
+library(momentuHMM)# fitting HMMs
+library(dplyr)     # data management
+library(tidyr)     # data management
+library(stringr)   # character string management
+library(data.table)# data management
+library(lubridate) # date management
+library(units)     # physical measurement units management
+library(diveMove)  # calculating dive metrics 
+library(earthtide) # estimating tidal data 
+library(corrplot)  # calculating Pearson&#39;s correlation matrices
+library(conicfit)  # fitting error ellipses (required by momentuHMM)
+library(car)       # additional operations to Applied Regression
+library(mitools)   # parallel processing
+library(doFuture)  # parallel processing
+library(kableExtra)# produce visually appealing tables</code></pre>
 </div>
 </div>
 
