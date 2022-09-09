@@ -803,6 +803,35 @@ dives_df <- dives_df %>%
 The next issue is that the dive data is at a different temporal resolution (75 s) than the location data (10 min). There are two options to include both data streams in the same HMM. First, we can choose to implement a hierarchical HMM, however, this is more complicated, and will be covered in tomorrow's tutorial. The second option, which we will use here, is to summarise the depth/dive data to a 10 min resolution and include them as additional data streams with step length and turning angle. To summarise the data, we will group the dive data by ID and unique 10-min intervals. Then we will summarise the data in each group using `dplyr::summarise`. Specifically, we will summarise them by either calculating the mean, max, or sum, depending on the dive metric.
 
 ```{r summarise_dive_data_to_10 min, attr.source = ".numberLines", message=FALSE}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+options(warn=-1)
 dives_sum <- dives_df %>% 
   # round time to same interval as location data
   mutate(time = floor_date(time, "10 min")) %>% 
@@ -839,6 +868,60 @@ Any of the eight variables can be used as data streams in the HMM, however, incl
 5. We want to avoid variables that are overdispersed and which would be difficult to describe using a statistical distribution. 
 6. Given that they are tied to autocorrelated behaviours, they too should exhibit some -- but not too much -- autocorrelation. 
 7. One of HMM's key assumptions that the data stream are be independent of each other, therefore, we should avoid select highly co-linear data streams.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 Assuming all the variables are biologically relevant, let's look at structure in the data. I will also add a subjective score based on the results (first number after `#` symbol). First, lets look at the amount of missing data. 
 

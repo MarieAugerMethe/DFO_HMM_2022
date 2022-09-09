@@ -86,40 +86,46 @@ install.packages(c('sf', 'terra', 'tmap'), dep=TRUE)
 
 The remaining packages do not have special dependencies, and should be easily installed or updated via CRAN (using install.packages()):
 
++ sf
++ terra
++ tmap
 + momentuHMM
 + dplyr
 + tidyr
-+ lubridate
-+ adehabitatLT
-+ tmap
-+ units
 + stringr
++ data.table
++ lubridate
++ units
 + diveMove
++ earthtide
++ corrplot
 + conicfit
 + car
 + mitools
 + doFuture
-+ corrplot
++ kableExtra
 
 ### Check that all packages are installed
 
 Once all the packages are installed, you can check that they are properly installed by loading them.
 
 ```{r, warning=FALSE, message=FALSE}
-library(sf)
-library(terra)
-library(tmap)
-library(momentuHMM)
-library(dplyr)
-library(tidyr)
-library(lubridate)
-library(adehabitatLT)
-library(units)
-library(stringr)
-library(diveMove)
-library(conicfit)
-library(car)
-library(mitools)
-library(doFuture)
-library(corrplot)
+library(sf)        # spatial data processing
+library(terra)     # raster data processing
+library(tmap)      # mapping spatial data
+library(momentuHMM)# fitting HMMs
+library(dplyr)     # data management
+library(tidyr)     # data management
+library(stringr)   # character string management
+library(data.table)# data management
+library(lubridate) # date management
+library(units)     # physical measurement units management
+library(diveMove)  # calculating dive metrics 
+library(earthtide) # estimating tidal data 
+library(corrplot)  # calculating Pearson's correlation matrices
+library(conicfit)  # fitting error ellipses (required by momentuHMM)
+library(car)       # additional operations to Applied Regression
+library(mitools)   # parallel processing
+library(doFuture)  # parallel processing
+library(kableExtra)# produce visually appealing tables
 ```
