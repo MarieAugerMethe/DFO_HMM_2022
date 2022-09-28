@@ -23,14 +23,14 @@ pre.numberSource code
 
 In yesterday's tutorial, we illustrated how to fit a basic HMM to high quality animal movement data to identify behaviours, and how to incorporate covariates on the state transition probability to identify conditions that promote different behaviours. In this tutorial, we will discuss methods to address missing data, which is very common in marine tracking data, how to integrate additional data streams (specifically, diving data), and incorporate covariates on the emission probabilities (e.g., step length depending on current speed). Specifically, we aim to address the following:
 
-1. Selecting appropriate resolution for data
+1. Selecting an appropriate resolution for the data
 2. Interpolating missing locations
     - Linear and statistical interpolation 
     - Voiding data gaps 
     - Path segmentation 
     - Multiple imputation
-3. Integrating diving data-streams
-4. Integrating covariates on emission probabilities
+3. Incorporating diving data-streams
+4. Incorporating covariates on emission probabilities
 
 In this tutorial, will be using two weeks of tracking data for three narwhal provided by Dr. Marianne Marcoux.
 
@@ -67,14 +67,14 @@ setwd("Day2")
 
 # Import data and initial data processing
 
-First, let's import the narwhal movement data. For simplicity, we will only examine data two weeks from August, 2017 for three individuals.
+First, let's import the narwhal movement data. For simplicity, we will only examine data from two weeks in August 2017 for three individuals.
 
 ```{r import_tracks, message=FALSE, attr.source = ".numberLines"}
 tracks <- read.csv("data/tracks.csv") %>%
   mutate(time = ymd_hms(time)) # define time
 ```
 
-The data we obtain is often quite messy with some records missing information and other records duplicated. We can filter only records with complete location data using `!is.na(x) & !is.na(y)`. To remove duplicate records (same time, location, and location class), we will use the `lag` function from `dplyr`, which will use the value from the previous row that we can compare to the current row.
+The data we obtain is often quite messy with some records missing information and other records duplicated. We can filter records to keep only complete location data using `!is.na(x) & !is.na(y)`. To remove duplicate records (same time, location, and location class), we will use the `lag` function from `dplyr`, which will use the value from the previous row so that we can compare to the current row.
 
 ```{r remove_missing_or_duplicate_data, message = FALSE, attr.source = ".numberLines"}
 tracks <- tracks %>% 
@@ -84,7 +84,7 @@ tracks <- tracks %>%
          !(time == lag(time) & x == lag(x) & y == lag(y) & loc_class == lag(loc_class)))
 ```
 
-Next, we'll convert the data to a spatial dataset using the `sf` package and plot the data. First, we define the coordinate reference system of the original data (in this case WGS84, which is defined by the EPSG code `4326`). Next, we will project the data into NAD83(CSRS) UTM zone 21N (`EPSG:2962`), which will projected the coordinates in meter units with minimal distortion for this data set.
+Next, we'll convert the data to a spatial dataset using the `sf` package and plot the data. First, we define the coordinate reference system of the original data (in this case WGS84, which is defined by the EPSG code `4326`). Next, we will project the data into NAD83(CSRS) UTM zone 21N (`EPSG:2962`), which will be projecting the coordinates in meter units with minimal distortion for this data set.
 
 ```{r define_projection, message=FALSE, attr.source = ".numberLines"}
 tracks_proj <- tracks %>%
@@ -117,9 +117,9 @@ tracks_gps %>%
 
 # Selecting a time interval for the HMM
 
-The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables. There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g., seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min.
+The classic HMM assumes the observations are collected in discrete time and that there is no missing data in the predictor variables. There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g., seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information. However, it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min.
 
-First, let's calculate the time difference between successive records using `difftime` and `lead` (compares current row to following row). For the last record of each individual (i.e., when `ID != lead(ID)`), we will set to `NA`.
+First, let's calculate the time difference between successive records using `difftime` and `lead` (compares current row to following row) and place these values in a new column called `dt`. Note that the time difference is in minutes (`units = "mins"`). For the last record of each individual (i.e., when `ID != lead(ID)`), we will set the value to `NA`.
 
 ```{r calc_dt, attr.source = ".numberLines"}
 # Calculate time difference between locations
@@ -132,7 +132,7 @@ tracks_gps <- tracks_gps %>%
 Let's see what resolutions may be possible in the data by looking at the most frequent time gaps.
 
 ```{r calc_track_dt, attr.source = ".numberLines", collapse=TRUE}
-# VisualiSe time differences
+# Visualise time differences
 hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)")
 # Zoom in on short intervals
 hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)", xlim = c(0,100))
