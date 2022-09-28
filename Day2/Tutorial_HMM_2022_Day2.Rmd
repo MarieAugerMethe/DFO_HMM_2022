@@ -382,7 +382,7 @@ NA_gaps <- function(tracks, times){
   tracks$angle[rows] <- NA
   return(tracks)
 }
-# define function to identify and nullify gaps
+# define function to identify and void gaps
 prepData_NAGaps <- function(track_list, tracks_crw, res, max_gap, ...){
   # for each ID, identify which rows have gaps >= max_gap 
   gaps_ls_rows <- lapply(track_list, function(x){
@@ -397,7 +397,7 @@ prepData_NAGaps <- function(track_list, tracks_crw, res, max_gap, ...){
     # combine into single vector for each track
     data.frame(start = gaps_ls_srt_end$start, end = gaps_ls_srt_end$end)
   },
-  track_list, gaps_ls_rows, SIMPLIFY = F)
+  track_list, gaps_ls_rows, SIMPLIFY = FALSE)
   
   # prep data and list by ID
   prep_tracks <- prepData(tracks_crw, ...) %>% 
@@ -405,7 +405,7 @@ prepData_NAGaps <- function(track_list, tracks_crw, res, max_gap, ...){
   
   # Interpolate the location at the times from the sequence
   mapply(FUN = NA_gaps, prep_tracks, gap_ls,
-         SIMPLIFY = F) %>% 
+         SIMPLIFY = FALSE) %>% 
     do.call("rbind", .) # convert list of tracks back to a single data.frame
 }
 
@@ -427,6 +427,7 @@ HMM_gps_crw_NAgaps <- fitHMM(prep_tracks_gps_crw_NAgaps,
 plot(HMM_gps_crw_NAgaps, ask = FALSE, animals = "T172062")
 plotPR(HMM_gps_crw_NAgaps)
 ```
+
 ```{r, attr.source = ".numberLines", collapse=TRUE}
 HMM_gps_crw$mle[c("step", "angle")]
 HMM_gps_crw_NAgaps$mle[c("step", "angle")]
@@ -436,7 +437,7 @@ Visually, the difference is subtle. However, the estimated parameters are quite 
 
 ## Approach 3: Path segmentation {#path-segmentation}
 
-Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect the subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the ID column. We will not implement this approach in this tutorial, however, path segmentation can be implemented using the following code:
+Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect the subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the ID column. Path segmentation can be implemented using the following code:
 
 ```{r track_segmentation, attr.source = ".numberLines", message=FALSE, cache=TRUE}
 # define maximum gap threshold in (3h in this case)
@@ -503,7 +504,8 @@ plot(HMM_sgmt_crw, ask = FALSE,
      animals = c("T172062_1", "T172062_2","T172062_3"))
 plotPR(HMM_sgmt_crw)
 ```
-There's not much difference from the previous model, so this approach may not be warranted in this case. Path segmentation could be particularly appropriate when gaps are large enough such that the data among consecutive segments is effectively independent from one another. 
+
+There's not much difference from the previous model, so this approach may not be warranted in this case. Path segmentation could be particularly appropriate when gaps are large enough such that the data among consecutive segments is effectively independent from one another. Note that we will not explore this approach further in this tutorial.
 
 ## Approach 4: Multiple imputation
 
@@ -554,10 +556,10 @@ set.seed(1)
 HMM_gps_MI <- MIfitHMM(crw_gps_10, nSims = 12, ncores = ncores,
                        nbStates = 2, dist = dist, Par0 = Par0, fit = TRUE)
 # plot MI fits
-plot(HMM_gps_MI, ask = F, animals = "T172062")
+plot(HMM_gps_MI, ask = FALSE, animals = "T172062")
 ```
 
-When plotting multiple imputed data, `momentuHMM`will include estimated location error ellipses in the plots.
+When plotting multiple imputed data, `momentuHMM` will include estimated location error ellipses in the plots.
 
 To better illustrate the effectiveness of multiple imputation in recovering states, we can randomly filter locations then compare state recovery from a single most likely imputed track to states from multiple-imputed tracks. First, let's randomly filter 98 locations for each narwhal (in addition to the first or last locations so that the path length is the same),
 
