@@ -25,7 +25,7 @@ In yesterday's tutorial, we illustrated how to fit a basic HMM to high quality a
 
 1. Selecting an appropriate resolution for the data
 2. Interpolating missing locations
-    - Linear and statistical interpolation 
+    - Linear and correlated random walk interpolation 
     - Voiding data gaps 
     - Path segmentation 
     - Multiple imputation
@@ -143,12 +143,12 @@ tracks_gps %>%
   head()
 ```
 
-We see that the most frequent time gap is 10 min, followed by 11, 12, 22, 9, and 13 min. We also see the majority of the gaps are \< 60 min, however some are in excess of 600 min. Because HMMs assume there are no missing records, finer resolutions will contain more gaps that would need to be interpolated. Frequent and large data gaps can be difficult to handle, especially as the number of missing data points approaches or exceeds the existing data. Let's examine the potential data structure at different resolutions for the different animals.
+We see that the most frequent time gap is 10 min, followed by 11, 12, 22, 9, and 13 min. We also see the majority of the gaps are \< 60 min, however some are in excess of 600 min. Because HMMs assume observations taken at regular time intervals, finer resolutions will contain more data gaps that would need to be interpolated. Frequent and large data gaps can be difficult to handle, especially as the number of missing data points approaches or exceeds the existing data. Let's examine the potential data structure at different resolutions for the different animals.
 
 We first create a function that approximates the proportion of missing locations we would have for a given resolution.
 
 ```{r proportion_NA_fx, attr.source = ".numberLines"}
-# Make function to estimate proportion of missing location 
+# Make function to estimate proportion of missing locations 
 p_na <- function(time, res) {
   time <- round_date(time, paste(res,"min")) # round to nearest resolution
   time <- na.omit(time[time != lead(time)]) # remove duplicate time
@@ -177,7 +177,8 @@ tracks_gps %>%
   add_header_above(c("", "Resolution" = 4))
 ```
 
-Here we see that the 10 min interval, around 50% of the locations would be missing. This is the limit that I would be comfortable at, since at finer resolutions, simulated data would outweigh real data, and may bias the results. Very large data gaps that contribute to much of the missing locations can be excluded from the analysis, therefore, for this tutorial, I will use a 10 min resolution.
+Here we see that the 10 min interval, around 50% of the locations would be missing. This is the limit that I would be comfortable at, since at finer resolutions, simulated data would outweigh real data, and may bias the results. 
+We will be able to exclude very large data gaps that contribute large numbers of missing locations, and therefore, for this tutorial, I will use a 10 min resolution.
 
 # Handling data gaps
 
@@ -204,7 +205,7 @@ tracks_gps_ls <- tracks_gps %>%
 
 ### Linear interpolation
 
-For large datasets with few and small gaps, the simplest approach is to use linear interpolation. First, let's identify the most likely minute we have data.
+For large datasets with few and small gaps, the simplest approach is to use linear interpolation. First, let's identify the minute for which we have most of the data.
 
 ```{r identify_most_freq_dt, attr.source = ".numberLines", message = FALSE}
 # which minute has the most data
@@ -247,12 +248,12 @@ approx_locs <- function(tracks, times){
 }
 ```
 
-Next, we will can apply our `approx_locs` function to estimate the locations for each animal using their respective regularised times. We can do this using the `mapply` function, which will map the function using each the following arguments as inputs to the specified function. That is, it will apply the `approx_locs` function iteratively to each element in the `tracks_gps_ls_time` and `tracks_gps_ls` lists. 
+Next, we will apply our `approx_locs` function to estimate the locations for each animal using their respective regularised times. We can do this using the `mapply` function, which will map the function using each the following arguments as inputs to the specified function. That is, it will apply the `approx_locs` function iteratively to each element in the `tracks_gps_ls_time` and `tracks_gps_ls` lists. 
 
 ```{r linear_interpolation, attr.source = ".numberLines"}
 # Interpolate the location at the times from the sequence
 tracks_gps_linear <- mapply(approx_locs, tracks_gps_ls, tracks_gps_ls_time,
-                            SIMPLIFY = F) %>% 
+                            SIMPLIFY = FALSE) %>% 
   do.call("rbind", .)  # convert list of tracks back to a single data.frame
 
 # remove row names added by rbind
@@ -305,7 +306,7 @@ plotPR(HMM_gps_linear)
 
 The plotted states look relatively ok, however there is quite a weird flat section in the QQ-plot of the turning angle. In data with large linearly-interpolated gaps, the model often represents the original dynamic data as one state, and defines the straight interpolated segments with a second state. This is a common problem when data gaps are frequent or large such that the information in the interpolated data outweighs the signal from the original observations. Generally, I would only use linear interpolation when data gaps are small (\< 3 locations) and relatively infrequent (\< 20 % of the modelled locations). In our data, some gaps are \> 5 hours (30 locations) and \> 50% of the modelled locations are interpolated. So we need to use another approach. The flat section in the QQ-plot around 0 emerges because the model overestimates the values just below the middle quantile (in our case, $0^\circ$) and just above the middle quantile. In other words, our model is not capturing the large amount of turning angles really close to $0^\circ$ (this may be considered a good thing in our case since we know these are linearly interpolated). In addition, the model is under-estimating the prevalence of the lowest and highest turn angle quantiles.
 
-### Statistical interpolation {#stat-int}
+### Correlated random walk interpolation {#stat-int}
 
 A slightly better way to interpolate locations is to fit a continuous-time correlated random walk (CTCRW) model to the data and predict the most likely locations. `momentuHMM` contains wrapper functions to interpolate missing locations by fitting a CTCRW to the data based on the `crawl` package by Devin Johnson and Josh London. There are many options to fit the CTCRW model, and a detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>. Let's try to fit the most basic model using the wrapper function `crawlWrap`. In the most basic form, we only need to provide tracking data with the columns `ID`, `time`, `x`, and `y` and specify the desired temporal resolution. 
 
@@ -316,7 +317,7 @@ set.seed(5)
 # fit crawl
 crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
 
-# view that all parameters were propperly estimated 
+# view that all parameters were properly estimated 
 crw_gps_10$crwFits %>% 
   lapply(function(x){
     x[c("par","se","ci")] %>%  # get estimated values 
@@ -616,7 +617,7 @@ As a comparison, let`s generate and fit 80 simulated tracks from the CTCRW fit t
 set.seed(1)
 # fit MI HMM
 HMM_gps_sub_MI <- MIfitHMM(crw_gps_sub, nSims = 80, ncores = ncores,
-                           nbStates = 2, dist = dist, Par0 = Par0, fit = T)
+                           nbStates = 2, dist = dist, Par0 = Par0, fit = TRUE)
 
 # pool simulation results 
 MIpool_gps_sub <- MIpool(HMM_gps_sub_MI[[2]]) 
