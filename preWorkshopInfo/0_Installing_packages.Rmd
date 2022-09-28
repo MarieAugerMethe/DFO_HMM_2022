@@ -86,6 +86,9 @@ install.packages(c('sf', 'terra', 'tmap'), dep=TRUE)
 
 The remaining packages do not have special dependencies, and should be easily installed or updated via CRAN (using install.packages()):
 
++ sf
++ terra
++ tmap
 + momentuHMM
 + dplyr
 + tidyr
