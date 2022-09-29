@@ -82,6 +82,13 @@ The latest version of sf and terra are **required**. The workshop material **wil
 install.packages(c('sf', 'terra', 'tmap'), dep=TRUE)
 ```
 
+We are trying to remove any usage of the package sp and raster (these are the packages that are now replaced by sf and terra), but since some of our original tutorials relied on these package, we suggest that you install them too for now.
+
+```{r, eval=FALSE}
+install.packages(c('raster', 'sp'), dep=TRUE)
+```
+
+
 ### Packages available on CRAN
 
 The remaining packages do not have special dependencies, and should be easily installed or updated via CRAN (using install.packages()):
@@ -89,6 +96,8 @@ The remaining packages do not have special dependencies, and should be easily in
 + sf
 + terra
 + tmap
++ raster
++ sp
 + momentuHMM
 + dplyr
 + tidyr
@@ -113,6 +122,8 @@ Once all the packages are installed, you can check that they are properly instal
 library(sf)        # spatial data processing
 library(terra)     # raster data processing
 library(tmap)      # mapping spatial data
+library(sp)        # old spatial package
+library(raster)    # old raster package
 library(momentuHMM)# fitting HMMs
 library(dplyr)     # data management
 library(tidyr)     # data management
