@@ -561,76 +561,7 @@ plot(HMM_gps_MI, ask = FALSE, animals = "T172062")
 
 When plotting multiple imputed data, `momentuHMM` will include estimated location error ellipses in the plots.
 
-To better illustrate the effectiveness of multiple imputation in recovering states, we can randomly filter locations then compare state recovery from a single most likely imputed track to states from multiple-imputed tracks. First, let's randomly filter 98 locations for each narwhal (in addition to the first or last locations so that the path length is the same),
-
-```{r sample_100_locs, attr.source = ".numberLines"}
-set.seed(1)
-# number of rows for each narwhal
-tracks_gps_sub <- tracks_gps_ls %>% 
-  lapply(function(x){
-    # number of rows for each narwhal
-    nrow <- nrow(x)
-    # rows to sample sorted chronologically
-    sub <- sort(c(1, nrow,  # first, last,
-                  sample(2:(nrow-1), 98)))  # random 98 from the middle
-    # sample selection
-    x[sub,]
-  }) %>% 
-  # convert back to a single data frame
-  do.call(rbind, .)
-```
-
-Next, lets fit a CTCRW to the sampled data (100 locs pre narwhal).
-
-```{r sample_crawl, attr.source = ".numberLines", cache=TRUE, message=FALSE}
-set.seed(3)
-# fit crawl
-crw_gps_sub <- crawlWrap(obsData = tracks_gps_sub, timeStep = "10 mins")
-# check that all parameters were estimated 
-crw_gps_sub$crwFits %>% 
-  lapply(function(x){
-    x[c("par","se","ci")] %>%  # get estimated values 
-      unlist() %>%  # unlist
-      is.nan() %>%  # identify values that failed to estimate
-      sum() == 0 # count failed estimates and ensure there are 0
-  })
-```
-
-Next, we can predict the most likely track using `prepData` on the CTCRW model, fit an HMM to this data using `fitHMM`, and calculate the proportion of decoded states that match the states predicted from the full data set.
-
-```{r sample_prep_fit, attr.source = ".numberLines", cache=TRUE, message=FALSE}
-# prep data
-prep_gps_sub <- prepData(data = crw_gps_sub)
-
-# Fit a 2 state HMM
-set.seed(1)
-HMM_gps_sub <- fitHMM(prep_gps_sub, nbState = 2, dist = dist, Par0 = Par0)
-
-# compare states
-sum(viterbi(HMM_gps_sub) ==
-      viterbi(HMM_gps_crw))/nrow(HMM_gps_sub$data)
-```
-
-In this case, it appears that there is only a $49\%$ overlap between the single imputation based on `r nrow(tracks_gps_sub)` sampled data points compared to HMM based on the `r nrow(tracks_gps)` data points in the original data. Given that there are only two states, $49\%$ is about what we would expect the model to estimate by random chance at all.
-
-As a comparison, let`s generate and fit 80 simulated tracks from the CTCRW fit to the sampled `r nrow(tracks_gps_sub)` locations, then compare the states. With 80 simulations, the benefits of parallel processing become very apparent.
-
-```{r sample_MIfit, attr.source = ".numberLines", cache=TRUE, message=FALSE}
-set.seed(1)
-# fit MI HMM
-HMM_gps_sub_MI <- MIfitHMM(crw_gps_sub, nSims = 80, ncores = ncores,
-                           nbStates = 2, dist = dist, Par0 = Par0, fit = TRUE)
-
-# pool simulation results 
-MIpool_gps_sub <- MIpool(HMM_gps_sub_MI[[2]]) 
-plot(MIpool_gps_sub, animals = "T172062")  # plot first narwhal
-
-# compare states
-sum(MIpool_gps_sub$Par$states == 
-      viterbi(HMM_gps_crw))/nrow(prep_gps_crw) 
-```
-
-Using multiple imputation, we see that the state overlap increases from $49\%$ to $75\%$. On your own time, try increasing the number of simulations even more to see how the predictions change.
+In section \@ref(bonus-MI), we investigate further the effectiveness of multiple imputation.
 
 ### Multiple imputation - preventing label switching
 
@@ -1713,7 +1644,83 @@ angleDM <- matrix(c(0,      0,                 0, 0,# mean resident
 
 Once the model is fit and the beta coefficients are estimated, the angle of attraction can be calculated using `atan2(b2, b1)`. See [Togunov et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.13681?casa_token=HUtNFmKXPR0AAAAA:TS2JyPeTT-di6IqkI0aHQEuxxM0izJxK5sKHJ3hohDPVEg3YkA5vJm2O0yrU_17B9smw4UCZ-eY9ew) and the [accompanying tutorial](https://besjournals.onlinelibrary.wiley.com/action/downloadSupplement?doi=10.1111%2F2041-210X.13681&file=mee313681-sup-0002-AppendixD.pdf) for details on fitting a menotactic BCRW using `momentuHMM`.
 
-# Bonus section: Dealing with location error and irregular time
+# Bonus section A: Investigating the advantages of multiple imputations {#bonus-MI}
+
+To better illustrate the effectiveness of multiple imputation in recovering states, we can randomly filter locations then compare state recovery from a single most likely imputed track to states from multiple-imputed tracks. First, let's randomly filter 98 locations for each narwhal (in addition to the first or last locations so that the path length is the same),
+
+```{r sample_100_locs, attr.source = ".numberLines"}
+set.seed(1)
+# number of rows for each narwhal
+tracks_gps_sub <- tracks_gps_ls %>% 
+  lapply(function(x){
+    # number of rows for each narwhal
+    nrow <- nrow(x)
+    # rows to sample sorted chronologically
+    sub <- sort(c(1, nrow,  # first, last,
+                  sample(2:(nrow-1), 98)))  # random 98 from the middle
+    # sample selection
+    x[sub,]
+  }) %>% 
+  # convert back to a single data frame
+  do.call(rbind, .)
+```
+
+Next, lets fit a CTCRW to the sampled data (100 locs pre narwhal).
+
+```{r sample_crawl, attr.source = ".numberLines", cache=TRUE, message=FALSE}
+set.seed(3)
+# fit crawl
+crw_gps_sub <- crawlWrap(obsData = tracks_gps_sub, timeStep = "10 mins")
+# check that all parameters were estimated 
+crw_gps_sub$crwFits %>% 
+  lapply(function(x){
+    x[c("par","se","ci")] %>%  # get estimated values 
+      unlist() %>%  # unlist
+      is.nan() %>%  # identify values that failed to estimate
+      sum() == 0 # count failed estimates and ensure there are 0
+  })
+```
+
+Next, we can predict the most likely track using `prepData` on the CTCRW model, fit an HMM to this data using `fitHMM`, and calculate the proportion of decoded states that match the states predicted from the full data set.
+
+```{r sample_prep_fit, attr.source = ".numberLines", cache=TRUE, message=FALSE}
+# prep data
+prep_gps_sub <- prepData(data = crw_gps_sub)
+
+# Fit a 2 state HMM
+set.seed(1)
+HMM_gps_sub <- fitHMM(prep_gps_sub, nbState = 2, dist = dist, Par0 = Par0)
+
+# compare states
+sum(viterbi(HMM_gps_sub) ==
+      viterbi(HMM_gps_crw))/nrow(HMM_gps_sub$data)
+```
+
+In this case, it appears that there is only a $49\%$ overlap between the single imputation based on `r nrow(tracks_gps_sub)` sampled data points compared to HMM based on the `r nrow(tracks_gps)` data points in the original data. Given that there are only two states, $49\%$ is about what we would expect the model to estimate by random chance at all.
+
+As a comparison, let's generate and fit 80 simulated tracks from the CTCRW fit to the sampled `r nrow(tracks_gps_sub)` locations, then compare the states. With 80 simulations, the benefits of parallel processing become very apparent.
+
+Note, this code chunk can cause problems on some R version.
+
+```{r sample_MIfit, attr.source = ".numberLines", cache=TRUE, message=FALSE, eval=FALSE}
+set.seed(1)
+# fit MI HMM
+HMM_gps_sub_MI <- MIfitHMM(crw_gps_sub, nSims = 80, ncores = ncores,
+                           nbStates = 2, dist = dist, Par0 = Par0, fit = TRUE)
+
+# pool simulation results 
+MIpool_gps_sub <- MIpool(HMM_gps_sub_MI[[2]]) 
+plot(MIpool_gps_sub, animals = "T172062")  # plot first narwhal
+
+# compare states
+sum(MIpool_gps_sub$Par$states == 
+      viterbi(HMM_gps_crw))/nrow(prep_gps_crw) 
+```
+
+Using multiple imputation, we see that the state overlap increases from $49\%$ to $75\%$. On your own time, try increasing the number of simulations even more to see how the predictions change.
+
+
+# Bonus section B: Dealing with location error and irregular time
 
 Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series.
 
