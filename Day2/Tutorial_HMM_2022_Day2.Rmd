@@ -737,34 +737,6 @@ dives_df <- dives_df %>%
 The next issue is that the dive data is at a different temporal resolution (75 s) than the location data (10 min). There are two options to include both data streams in the same HMM. First, we can choose to implement a hierarchical HMM, however, this is more complicated, and will be covered in tomorrow's tutorial. The second option, which we will use here, is to summarise the depth/dive data to a 10 min resolution and include them as additional data streams with step length and turning angle. To summarise the data, we will group the dive data by ID and unique 10-min intervals. Then we will summarise the data in each group using `dplyr::summarise`. Specifically, we will summarise them by either calculating the mean, max, or sum, depending on the dive metric.
 
 ```{r summarise_dive_data_to_10 min, attr.source = ".numberLines", message=FALSE}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 options(warn=-1)
 dives_sum <- dives_df %>% 
   # round time to same interval as location data
@@ -798,64 +770,10 @@ Any of the eight variables can be used as data streams in the HMM, however, incl
 1. Variable can be selected using expert on the species behaviour and research question. 
 2. We preferably want to avoid variable with a lot of missing data. 
 3. The data streams should exhibit variation and evidence of clustering or multi-modality that may be tied to the underlying behaviours. 
-4. Data streams with no variation or conversely are very noisy contain little information on underlying behaviour. 
-5. We want to avoid variables that are overdispersed and which would be difficult to describe using a statistical distribution. 
+4. Data streams with no variation, or conversely are very noisy, contain little information on underlying behaviour. 
+5. We want to avoid variables that are overdispersed and which would be difficult to describe using a statistical distribution.
 6. Given that they are tied to autocorrelated behaviours, they too should exhibit some -- but not too much -- autocorrelation. 
 7. One of HMM's key assumptions that the data stream are be independent of each other, therefore, we should avoid select highly co-linear data streams.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 Assuming all the variables are biologically relevant, let's look at structure in the data. I will also add a subjective score based on the results (first number after `#` symbol). First, lets look at the amount of missing data. 
 
@@ -878,11 +796,12 @@ dives_sum %>%
   kable(align = 'c') %>% kable_styling() %>% 
   row_spec(4, bold = T)
 ```
+
 The first three dive metrics have less missing data than the latter five, which is good. 
 
 Second, we will plot a histogram for each dive metric to examine presence of multi-modality, balanced variation, and no over-dispersion. As the dive variables are zero-bound, we will apply a log transformation to all to better reflect the variation at the lower quantiles. 
-```{r data_structure2, fig.asp=1.5,attr.source = ".numberLines", cache=T}
 
+```{r data_structure2, fig.asp=1.5,attr.source = ".numberLines", cache=T}
 par(mfrow = c(4,2))
 # in the distirbution 
 hist(log(dives_sum$mean_dep), 100, 
@@ -957,7 +876,7 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
   corrplot(method="number")
 ```
 
-`step` and `angle` seem quit independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, so we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however, `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`.
+`step` and `angle` seem quite independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, so we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however, `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`.
 
 It is important to remember that the observations are conditionally independent base on the state. Therefore, some of the co-linearity we see could be explained by the underlying state. So, it may still be appropriate to use some co-linear data streams if there is biological reasoning or if they had indicators of being promising data streams to use. 
 
