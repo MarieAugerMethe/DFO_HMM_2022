@@ -565,7 +565,7 @@ In section \@ref(bonus-MI), we investigate further the effectiveness of multiple
 
 ### Multiple imputation - preventing label switching
 
-One issue that may come up when implementing multiple imputation is "label switching". Label switching is when two or more HMMs converge effectively the same (i.e., all parameter estimates are the same), but they assign a different state to the set of parameters. For example, one HMM defines state 1 as slow and state 2 as fast, while a second HMM defines state 1 as fast and state 2 as slow. This can occur if the states have similar parameters, if the initial starting parameters are far from the optimum, or the likelihood surface is noisy or complex. The key issue that may arise from label switching, is when pooling the results from multiple imputations, the summarized parameters or estimated states would be incorrect. The best strategy to preventing state label switching is to use pseudo-design matrices (pseudo-DM) in tandem with the `workBounds` argument when repeatedly fitting the same HMM. Pseudo-DMs operate by mapping working parameters (columns) to natural parameters (rows). Each distribution parameter (e.g., step length mean and SD) for each state must have precisely one corresponding row in the DM. For example, a two state HMM, with one data stream (e.g., step length) that is defined by two parameters (e.g., mean and SD) must have 4 rows. If the parameters for each state are completely independent, the pseudo DM would look as follows:
+One issue that may come up when implementing multiple imputation is "label switching". Label switching is when two or more HMMs converge to effectively the same (i.e., all parameter estimates are the same), but they assign a different state to the set of parameters. For example, one HMM defines state 1 as slow and state 2 as fast, while a second HMM defines state 1 as fast and state 2 as slow. This can occur if the states have similar parameters, if the initial starting parameters are far from the optimum, or the likelihood surface is noisy or complex. The key issue that may arise from label switching, is when pooling the results from multiple imputations, the summarized parameters or estimated states would be incorrect. The best strategy to preventing state label switching is to use pseudo-design matrices (pseudo-DM) in tandem with the `workBounds` argument when repeatedly fitting the same HMM. Pseudo-DMs operate by mapping working parameters (columns) to natural parameters (rows). Each distribution parameter (e.g., step length mean and SD) for each state must have precisely one corresponding row in the DM. For example, a two-state HMM, with one data stream (e.g., step length) that is defined by two parameters (e.g., mean and SD) must have 4 rows. If the parameters for each state are completely independent, the pseudo DM would look as follows:
 
 ```{r DM_independent}
                 #  b1,b2,b3,b4
@@ -632,8 +632,8 @@ Par0_WB <- list(step = log(Par0$step),
                 angle = Par0$angle)
 Par0_WB$step[2] <- 0
 # fit MI HMM
-HMM_gps_sub_MI_WB <- MIfitHMM(crw_gps_sub, nSims = 10, ncores = ncores, 
-                              nbStates = 2, dist = dist, fit = T,
+HMM_gps_sub_MI_WB <- MIfitHMM(crw_gps_10, nSims = 10, ncores = ncores, 
+                              nbStates = 2, dist = dist, fit = TRUE,
                               Par0 = Par0_WB, DM = DM, workBounds = WB)
 ```
 
