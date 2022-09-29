@@ -23,14 +23,14 @@ pre.numberSource code
 
 In yesterday's tutorial, we illustrated how to fit a basic HMM to high quality animal movement data to identify behaviours, and how to incorporate covariates on the state transition probability to identify conditions that promote different behaviours. In this tutorial, we will discuss methods to address missing data, which is very common in marine tracking data, how to integrate additional data streams (specifically, diving data), and incorporate covariates on the emission probabilities (e.g., step length depending on current speed). Specifically, we aim to address the following:
 
-1. Selecting appropriate resolution for data
+1. Selecting an appropriate resolution for the data
 2. Interpolating missing locations
-    - Linear and statistical interpolation 
+    - Linear and correlated random walk interpolation 
     - Voiding data gaps 
     - Path segmentation 
     - Multiple imputation
-3. Integrating diving data-streams
-4. Integrating covariates on emission probabilities
+3. Incorporating diving data-streams
+4. Incorporating covariates on emission probabilities
 
 In this tutorial, will be using two weeks of tracking data for three narwhal provided by Dr. Marianne Marcoux.
 
@@ -67,14 +67,14 @@ setwd("Day2")
 
 # Import data and initial data processing
 
-First, let's import the narwhal movement data. For simplicity, we will only examine data two weeks from August, 2017 for three individuals.
+First, let's import the narwhal movement data. For simplicity, we will only examine data from two weeks in August 2017 for three individuals.
 
 ```{r import_tracks, message=FALSE, attr.source = ".numberLines"}
 tracks <- read.csv("data/tracks.csv") %>%
   mutate(time = ymd_hms(time)) # define time
 ```
 
-The data we obtain is often quite messy with some records missing information and other records duplicated. We can filter only records with complete location data using `!is.na(x) & !is.na(y)`. To remove duplicate records (same time, location, and location class), we will use the `lag` function from `dplyr`, which will use the value from the previous row that we can compare to the current row.
+The data we obtain is often quite messy with some records missing information and other records duplicated. We can filter records to keep only complete location data using `!is.na(x) & !is.na(y)`. To remove duplicate records (same time, location, and location class), we will use the `lag` function from `dplyr`, which will use the value from the previous row so that we can compare to the current row.
 
 ```{r remove_missing_or_duplicate_data, message = FALSE, attr.source = ".numberLines"}
 tracks <- tracks %>% 
@@ -84,7 +84,7 @@ tracks <- tracks %>%
          !(time == lag(time) & x == lag(x) & y == lag(y) & loc_class == lag(loc_class)))
 ```
 
-Next, we'll convert the data to a spatial dataset using the `sf` package and plot the data. First, we define the coordinate reference system of the original data (in this case WGS84, which is defined by the EPSG code `4326`). Next, we will project the data into NAD83(CSRS) UTM zone 21N (`EPSG:2962`), which will projected the coordinates in meter units with minimal distortion for this data set.
+Next, we'll convert the data to a spatial dataset using the `sf` package and plot the data. First, we define the coordinate reference system of the original data (in this case WGS84, which is defined by the EPSG code `4326`). Next, we will project the data into NAD83(CSRS) UTM zone 21N (`EPSG:2962`), which will be projecting the coordinates in meter units with minimal distortion for this data set.
 
 ```{r define_projection, message=FALSE, attr.source = ".numberLines"}
 tracks_proj <- tracks %>%
@@ -117,9 +117,9 @@ tracks_gps %>%
 
 # Selecting a time interval for the HMM
 
-The classic HMM assumes the observation data is in discrete time and that there is no missing data in the predictor variables. There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g., seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information, however it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min.
+The classic HMM assumes the observations are collected in discrete time and that there is no missing data in the predictor variables. There are two key decisions we must make, the temporal resolution to use, and how to address data gaps. The desired resolution depends predominantly on the biological question you are asking as different behaviours and biological processes occur at different spatial and temporal scales (e.g., seasonal migration, daily movement between foraging and resting grounds, and fine scale foraging decisions). Generally, higher resolution data is preferred as it has more information. However, it is possible to have too-high of a resolution wherein information from fine-scale variability drowns out the signal from coarse-scale patterns of interest (e.g., seasonal migration). In this case, we will be linking the movement data with high resolution (75 s) dive data to look at finer-scale behaviours (on the order of a few hours). My rule of thumb, is that you want 3-50 data points per behaviour. For behaviours spanning several hours, that roughly corresponds to a desired resolution between 2 min and 60 min.
 
-First, let's calculate the time difference between successive records using `difftime` and `lead` (compares current row to following row). For the last record of each individual (i.e., when `ID != lead(ID)`), we will set to `NA`.
+First, let's calculate the time difference between successive records using `difftime` and `lead` (compares current row to following row) and place these values in a new column called `dt`. Note that the time difference is in minutes (`units = "mins"`). For the last record of each individual (i.e., when `ID != lead(ID)`), we will set the value to `NA`.
 
 ```{r calc_dt, attr.source = ".numberLines"}
 # Calculate time difference between locations
@@ -132,7 +132,7 @@ tracks_gps <- tracks_gps %>%
 Let's see what resolutions may be possible in the data by looking at the most frequent time gaps.
 
 ```{r calc_track_dt, attr.source = ".numberLines", collapse=TRUE}
-# VisualiSe time differences
+# Visualise time differences
 hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)")
 # Zoom in on short intervals
 hist(tracks_gps$dt, 1000, main = NA, xlab = "Time difference (min)", xlim = c(0,100))
@@ -143,12 +143,12 @@ tracks_gps %>%
   head()
 ```
 
-We see that the most frequent time gap is 10 min, followed by 11, 12, 22, 9, and 13 min. We also see the majority of the gaps are \< 60 min, however some are in excess of 600 min. Because HMMs assume there are no missing records, finer resolutions will contain more gaps that would need to be interpolated. Frequent and large data gaps can be difficult to handle, especially as the number of missing data points approaches or exceeds the existing data. Let's examine the potential data structure at different resolutions for the different animals.
+We see that the most frequent time gap is 10 min, followed by 11, 12, 22, 9, and 13 min. We also see the majority of the gaps are \< 60 min, however some are in excess of 600 min. Because HMMs assume observations taken at regular time intervals, finer resolutions will contain more data gaps that would need to be interpolated. Frequent and large data gaps can be difficult to handle, especially as the number of missing data points approaches or exceeds the existing data. Let's examine the potential data structure at different resolutions for the different animals.
 
 We first create a function that approximates the proportion of missing locations we would have for a given resolution.
 
 ```{r proportion_NA_fx, attr.source = ".numberLines"}
-# Make function to estimate proportion of missing location 
+# Make function to estimate proportion of missing locations 
 p_na <- function(time, res) {
   time <- round_date(time, paste(res,"min")) # round to nearest resolution
   time <- na.omit(time[time != lead(time)]) # remove duplicate time
@@ -177,7 +177,8 @@ tracks_gps %>%
   add_header_above(c("", "Resolution" = 4))
 ```
 
-Here we see that the 10 min interval, around 50% of the locations would be missing. This is the limit that I would be comfortable at, since at finer resolutions, simulated data would outweigh real data, and may bias the results. Very large data gaps that contribute to much of the missing locations can be excluded from the analysis, therefore, for this tutorial, I will use a 10 min resolution.
+Here we see that the 10 min interval, around 50% of the locations would be missing. This is the limit that I would be comfortable at, since at finer resolutions, simulated data would outweigh real data, and may bias the results. 
+We will be able to exclude very large data gaps that contribute large numbers of missing locations, and therefore, for this tutorial, I will use a 10 min resolution.
 
 # Handling data gaps
 
@@ -204,7 +205,7 @@ tracks_gps_ls <- tracks_gps %>%
 
 ### Linear interpolation
 
-For large datasets with few and small gaps, the simplest approach is to use linear interpolation. First, let's identify the most likely minute we have data.
+For large datasets with few and small gaps, the simplest approach is to use linear interpolation. First, let's identify the minute for which we have most of the data.
 
 ```{r identify_most_freq_dt, attr.source = ".numberLines", message = FALSE}
 # which minute has the most data
@@ -247,12 +248,12 @@ approx_locs <- function(tracks, times){
 }
 ```
 
-Next, we will can apply our `approx_locs` function to estimate the locations for each animal using their respective regularised times. We can do this using the `mapply` function, which will map the function using each the following arguments as inputs to the specified function. That is, it will apply the `approx_locs` function iteratively to each element in the `tracks_gps_ls_time` and `tracks_gps_ls` lists. 
+Next, we will apply our `approx_locs` function to estimate the locations for each animal using their respective regularised times. We can do this using the `mapply` function, which will map the function using each the following arguments as inputs to the specified function. That is, it will apply the `approx_locs` function iteratively to each element in the `tracks_gps_ls_time` and `tracks_gps_ls` lists. 
 
 ```{r linear_interpolation, attr.source = ".numberLines"}
 # Interpolate the location at the times from the sequence
 tracks_gps_linear <- mapply(approx_locs, tracks_gps_ls, tracks_gps_ls_time,
-                            SIMPLIFY = F) %>% 
+                            SIMPLIFY = FALSE) %>% 
   do.call("rbind", .)  # convert list of tracks back to a single data.frame
 
 # remove row names added by rbind
@@ -305,7 +306,7 @@ plotPR(HMM_gps_linear)
 
 The plotted states look relatively ok, however there is quite a weird flat section in the QQ-plot of the turning angle. In data with large linearly-interpolated gaps, the model often represents the original dynamic data as one state, and defines the straight interpolated segments with a second state. This is a common problem when data gaps are frequent or large such that the information in the interpolated data outweighs the signal from the original observations. Generally, I would only use linear interpolation when data gaps are small (\< 3 locations) and relatively infrequent (\< 20 % of the modelled locations). In our data, some gaps are \> 5 hours (30 locations) and \> 50% of the modelled locations are interpolated. So we need to use another approach. The flat section in the QQ-plot around 0 emerges because the model overestimates the values just below the middle quantile (in our case, $0^\circ$) and just above the middle quantile. In other words, our model is not capturing the large amount of turning angles really close to $0^\circ$ (this may be considered a good thing in our case since we know these are linearly interpolated). In addition, the model is under-estimating the prevalence of the lowest and highest turn angle quantiles.
 
-### Statistical interpolation {#stat-int}
+### Correlated random walk interpolation {#stat-int}
 
 A slightly better way to interpolate locations is to fit a continuous-time correlated random walk (CTCRW) model to the data and predict the most likely locations. `momentuHMM` contains wrapper functions to interpolate missing locations by fitting a CTCRW to the data based on the `crawl` package by Devin Johnson and Josh London. There are many options to fit the CTCRW model, and a detailed tutorial for analysis with `crawl` is available here: <https://jmlondon.github.io/crawl-workshop/crawl-practical.html>. Let's try to fit the most basic model using the wrapper function `crawlWrap`. In the most basic form, we only need to provide tracking data with the columns `ID`, `time`, `x`, and `y` and specify the desired temporal resolution. 
 
@@ -316,7 +317,7 @@ set.seed(5)
 # fit crawl
 crw_gps_10 <- crawlWrap(obsData = tracks_gps, timeStep = "10 mins")
 
-# view that all parameters were propperly estimated 
+# view that all parameters were properly estimated 
 crw_gps_10$crwFits %>% 
   lapply(function(x){
     x[c("par","se","ci")] %>%  # get estimated values 
@@ -381,7 +382,7 @@ NA_gaps <- function(tracks, times){
   tracks$angle[rows] <- NA
   return(tracks)
 }
-# define function to identify and nullify gaps
+# define function to identify and void gaps
 prepData_NAGaps <- function(track_list, tracks_crw, res, max_gap, ...){
   # for each ID, identify which rows have gaps >= max_gap 
   gaps_ls_rows <- lapply(track_list, function(x){
@@ -396,7 +397,7 @@ prepData_NAGaps <- function(track_list, tracks_crw, res, max_gap, ...){
     # combine into single vector for each track
     data.frame(start = gaps_ls_srt_end$start, end = gaps_ls_srt_end$end)
   },
-  track_list, gaps_ls_rows, SIMPLIFY = F)
+  track_list, gaps_ls_rows, SIMPLIFY = FALSE)
   
   # prep data and list by ID
   prep_tracks <- prepData(tracks_crw, ...) %>% 
@@ -404,7 +405,7 @@ prepData_NAGaps <- function(track_list, tracks_crw, res, max_gap, ...){
   
   # Interpolate the location at the times from the sequence
   mapply(FUN = NA_gaps, prep_tracks, gap_ls,
-         SIMPLIFY = F) %>% 
+         SIMPLIFY = FALSE) %>% 
     do.call("rbind", .) # convert list of tracks back to a single data.frame
 }
 
@@ -426,6 +427,7 @@ HMM_gps_crw_NAgaps <- fitHMM(prep_tracks_gps_crw_NAgaps,
 plot(HMM_gps_crw_NAgaps, ask = FALSE, animals = "T172062")
 plotPR(HMM_gps_crw_NAgaps)
 ```
+
 ```{r, attr.source = ".numberLines", collapse=TRUE}
 HMM_gps_crw$mle[c("step", "angle")]
 HMM_gps_crw_NAgaps$mle[c("step", "angle")]
@@ -435,7 +437,7 @@ Visually, the difference is subtle. However, the estimated parameters are quite 
 
 ## Approach 3: Path segmentation {#path-segmentation}
 
-Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect the subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the ID column. We will not implement this approach in this tutorial, however, path segmentation can be implemented using the following code:
+Another strategy to deal with larger gaps is to segment the tracks with a new individual ID. This may be particularly appropriate for gaps where we may reasonably expect that the underlying states are effectively independent of one another. Specifically, we may ask, over what period of time does the behaviour of the animal affect the subsequent behaviour. In this case, we may expect that the behaviour of a narwhal depends on the behaviour over the proceeding several hours, however is independent after 24 hours. We can split the tracks for gaps larger than a predetermined threshold by iterating the ID column. Path segmentation can be implemented using the following code:
 
 ```{r track_segmentation, attr.source = ".numberLines", message=FALSE, cache=TRUE}
 # define maximum gap threshold in (3h in this case)
@@ -502,7 +504,8 @@ plot(HMM_sgmt_crw, ask = FALSE,
      animals = c("T172062_1", "T172062_2","T172062_3"))
 plotPR(HMM_sgmt_crw)
 ```
-There's not much difference from the previous model, so this approach may not be warranted in this case. Path segmentation could be particularly appropriate when gaps are large enough such that the data among consecutive segments is effectively independent from one another. 
+
+There's not much difference from the previous model, so this approach may not be warranted in this case. Path segmentation could be particularly appropriate when gaps are large enough such that the data among consecutive segments is effectively independent from one another. Note that we will not explore this approach further in this tutorial.
 
 ## Approach 4: Multiple imputation
 
@@ -553,85 +556,16 @@ set.seed(1)
 HMM_gps_MI <- MIfitHMM(crw_gps_10, nSims = 12, ncores = ncores,
                        nbStates = 2, dist = dist, Par0 = Par0, fit = TRUE)
 # plot MI fits
-plot(HMM_gps_MI, ask = F, animals = "T172062")
+plot(HMM_gps_MI, ask = FALSE, animals = "T172062")
 ```
 
-When plotting multiple imputed data, `momentuHMM`will include estimated location error ellipses in the plots.
+When plotting multiple imputed data, `momentuHMM` will include estimated location error ellipses in the plots.
 
-To better illustrate the effectiveness of multiple imputation in recovering states, we can randomly filter locations then compare state recovery from a single most likely imputed track to states from multiple-imputed tracks. First, let's randomly filter 98 locations for each narwhal (in addition to the first or last locations so that the path length is the same),
-
-```{r sample_100_locs, attr.source = ".numberLines"}
-set.seed(1)
-# number of rows for each narwhal
-tracks_gps_sub <- tracks_gps_ls %>% 
-  lapply(function(x){
-    # number of rows for each narwhal
-    nrow <- nrow(x)
-    # rows to sample sorted chronologically
-    sub <- sort(c(1, nrow,  # first, last,
-                  sample(2:(nrow-1), 98)))  # random 98 from the middle
-    # sample selection
-    x[sub,]
-  }) %>% 
-  # convert back to a single data frame
-  do.call(rbind, .)
-```
-
-Next, lets fit a CTCRW to the sampled data (100 locs pre narwhal).
-
-```{r sample_crawl, attr.source = ".numberLines", cache=TRUE, message=FALSE}
-set.seed(3)
-# fit crawl
-crw_gps_sub <- crawlWrap(obsData = tracks_gps_sub, timeStep = "10 mins")
-# check that all parameters were estimated 
-crw_gps_sub$crwFits %>% 
-  lapply(function(x){
-    x[c("par","se","ci")] %>%  # get estimated values 
-      unlist() %>%  # unlist
-      is.nan() %>%  # identify values that failed to estimate
-      sum() == 0 # count failed estimates and ensure there are 0
-  })
-```
-
-Next, we can predict the most likely track using `prepData` on the CTCRW model, fit an HMM to this data using `fitHMM`, and calculate the proportion of decoded states that match the states predicted from the full data set.
-
-```{r sample_prep_fit, attr.source = ".numberLines", cache=TRUE, message=FALSE}
-# prep data
-prep_gps_sub <- prepData(data = crw_gps_sub)
-
-# Fit a 2 state HMM
-set.seed(1)
-HMM_gps_sub <- fitHMM(prep_gps_sub, nbState = 2, dist = dist, Par0 = Par0)
-
-# compare states
-sum(viterbi(HMM_gps_sub) ==
-      viterbi(HMM_gps_crw))/nrow(HMM_gps_sub$data)
-```
-
-In this case, it appears that there is only a $49\%$ overlap between the single imputation based on `r nrow(tracks_gps_sub)` sampled data points compared to HMM based on the `r nrow(tracks_gps)` data points in the original data. Given that there are only two states, $49\%$ is about what we would expect the model to estimate by random chance at all.
-
-As a comparison, let`s generate and fit 80 simulated tracks from the CTCRW fit to the sampled `r nrow(tracks_gps_sub)` locations, then compare the states. With 80 simulations, the benefits of parallel processing become very apparent.
-
-```{r sample_MIfit, attr.source = ".numberLines", cache=TRUE, message=FALSE}
-set.seed(1)
-# fit MI HMM
-HMM_gps_sub_MI <- MIfitHMM(crw_gps_sub, nSims = 80, ncores = ncores,
-                           nbStates = 2, dist = dist, Par0 = Par0, fit = T)
-
-# pool simulation results 
-MIpool_gps_sub <- MIpool(HMM_gps_sub_MI[[2]]) 
-plot(MIpool_gps_sub, animals = "T172062")  # plot first narwhal
-
-# compare states
-sum(MIpool_gps_sub$Par$states == 
-      viterbi(HMM_gps_crw))/nrow(prep_gps_crw) 
-```
-
-Using multiple imputation, we see that the state overlap increases from $49\%$ to $75\%$. On your own time, try increasing the number of simulations even more to see how the predictions change.
+In section \@ref(bonus-MI), we investigate further the effectiveness of multiple imputation.
 
 ### Multiple imputation - preventing label switching
 
-One issue that may come up when implementing multiple imputation is "label switching". Label switching is when two or more HMMs converge effectively the same (i.e., all parameter estimates are the same), but they assign a different state to the set of parameters. For example, one HMM defines state 1 as slow and state 2 as fast, while a second HMM defines state 1 as fast and state 2 as slow. This can occur if the states have similar parameters, if the initial starting parameters are far from the optimum, or the likelihood surface is noisy or complex. The key issue that may arise from label switching, is when pooling the results from multiple imputations, the summarized parameters or estimated states would be incorrect. The best strategy to preventing state label switching is to use pseudo-design matrices (pseudo-DM) in tandem with the `workBounds` argument when repeatedly fitting the same HMM. Pseudo-DMs operate by mapping working parameters (columns) to natural parameters (rows). Each distribution parameter (e.g., step length mean and SD) for each state must have precisely one corresponding row in the DM. For example, a two state HMM, with one data stream (e.g., step length) that is defined by two parameters (e.g., mean and SD) must have 4 rows. If the parameters for each state are completely independent, the pseudo DM would look as follows:
+One issue that may come up when implementing multiple imputation is "label switching". Label switching is when two or more HMMs converge to effectively the same (i.e., all parameter estimates are the same), but they assign a different state to the set of parameters. For example, one HMM defines state 1 as slow and state 2 as fast, while a second HMM defines state 1 as fast and state 2 as slow. This can occur if the states have similar parameters, if the initial starting parameters are far from the optimum, or the likelihood surface is noisy or complex. The key issue that may arise from label switching, is when pooling the results from multiple imputations, the summarized parameters or estimated states would be incorrect. The best strategy to preventing state label switching is to use pseudo-design matrices (pseudo-DM) in tandem with the `workBounds` argument when repeatedly fitting the same HMM. Pseudo-DMs operate by mapping working parameters (columns) to natural parameters (rows). Each distribution parameter (e.g., step length mean and SD) for each state must have precisely one corresponding row in the DM. For example, a two-state HMM, with one data stream (e.g., step length) that is defined by two parameters (e.g., mean and SD) must have 4 rows. If the parameters for each state are completely independent, the pseudo DM would look as follows:
 
 ```{r DM_independent}
                 #  b1,b2,b3,b4
@@ -698,8 +632,8 @@ Par0_WB <- list(step = log(Par0$step),
                 angle = Par0$angle)
 Par0_WB$step[2] <- 0
 # fit MI HMM
-HMM_gps_sub_MI_WB <- MIfitHMM(crw_gps_sub, nSims = 10, ncores = ncores, 
-                              nbStates = 2, dist = dist, fit = T,
+HMM_gps_sub_MI_WB <- MIfitHMM(crw_gps_10, nSims = 10, ncores = ncores, 
+                              nbStates = 2, dist = dist, fit = TRUE,
                               Par0 = Par0_WB, DM = DM, workBounds = WB)
 ```
 
@@ -803,34 +737,6 @@ dives_df <- dives_df %>%
 The next issue is that the dive data is at a different temporal resolution (75 s) than the location data (10 min). There are two options to include both data streams in the same HMM. First, we can choose to implement a hierarchical HMM, however, this is more complicated, and will be covered in tomorrow's tutorial. The second option, which we will use here, is to summarise the depth/dive data to a 10 min resolution and include them as additional data streams with step length and turning angle. To summarise the data, we will group the dive data by ID and unique 10-min intervals. Then we will summarise the data in each group using `dplyr::summarise`. Specifically, we will summarise them by either calculating the mean, max, or sum, depending on the dive metric.
 
 ```{r summarise_dive_data_to_10 min, attr.source = ".numberLines", message=FALSE}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 options(warn=-1)
 dives_sum <- dives_df %>% 
   # round time to same interval as location data
@@ -864,64 +770,10 @@ Any of the eight variables can be used as data streams in the HMM, however, incl
 1. Variable can be selected using expert on the species behaviour and research question. 
 2. We preferably want to avoid variable with a lot of missing data. 
 3. The data streams should exhibit variation and evidence of clustering or multi-modality that may be tied to the underlying behaviours. 
-4. Data streams with no variation or conversely are very noisy contain little information on underlying behaviour. 
-5. We want to avoid variables that are overdispersed and which would be difficult to describe using a statistical distribution. 
+4. Data streams with no variation, or conversely are very noisy, contain little information on underlying behaviour. 
+5. We want to avoid variables that are overdispersed and which would be difficult to describe using a statistical distribution.
 6. Given that they are tied to autocorrelated behaviours, they too should exhibit some -- but not too much -- autocorrelation. 
 7. One of HMM's key assumptions that the data stream are be independent of each other, therefore, we should avoid select highly co-linear data streams.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 Assuming all the variables are biologically relevant, let's look at structure in the data. I will also add a subjective score based on the results (first number after `#` symbol). First, lets look at the amount of missing data. 
 
@@ -944,11 +796,12 @@ dives_sum %>%
   kable(align = 'c') %>% kable_styling() %>% 
   row_spec(4, bold = T)
 ```
+
 The first three dive metrics have less missing data than the latter five, which is good. 
 
 Second, we will plot a histogram for each dive metric to examine presence of multi-modality, balanced variation, and no over-dispersion. As the dive variables are zero-bound, we will apply a log transformation to all to better reflect the variation at the lower quantiles. 
-```{r data_structure2, fig.asp=1.5,attr.source = ".numberLines", cache=T}
 
+```{r data_structure2, fig.asp=1.5,attr.source = ".numberLines", cache=T}
 par(mfrow = c(4,2))
 # in the distirbution 
 hist(log(dives_sum$mean_dep), 100, 
@@ -1023,7 +876,7 @@ tracks_dives[,c("max_dep", "dive_t", "mean_dep", "max_dive_dep",
   corrplot(method="number")
 ```
 
-`step` and `angle` seem quit independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, so we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however, `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`.
+`step` and `angle` seem quite independent from all variables as does `bott_dist`. Unfortunately, there is quite high correlation between the first four dive data streams, so we will have to select which to use. `dive_t` and `mean_dep` have the lowest correlation with `bott_dist` and `step`, however, `max_dep` had the highest subjective score. For the purposes of this tutorial, I will use `max_dep` and `bott_dist`.
 
 It is important to remember that the observations are conditionally independent base on the state. Therefore, some of the co-linearity we see could be explained by the underlying state. So, it may still be appropriate to use some co-linear data streams if there is biological reasoning or if they had indicators of being promising data streams to use. 
 
@@ -1710,7 +1563,83 @@ angleDM <- matrix(c(0,      0,                 0, 0,# mean resident
 
 Once the model is fit and the beta coefficients are estimated, the angle of attraction can be calculated using `atan2(b2, b1)`. See [Togunov et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.13681?casa_token=HUtNFmKXPR0AAAAA:TS2JyPeTT-di6IqkI0aHQEuxxM0izJxK5sKHJ3hohDPVEg3YkA5vJm2O0yrU_17B9smw4UCZ-eY9ew) and the [accompanying tutorial](https://besjournals.onlinelibrary.wiley.com/action/downloadSupplement?doi=10.1111%2F2041-210X.13681&file=mee313681-sup-0002-AppendixD.pdf) for details on fitting a menotactic BCRW using `momentuHMM`.
 
-# Bonus section: Dealing with location error and irregular time
+# Bonus section A: Investigating the advantages of multiple imputations {#bonus-MI}
+
+To better illustrate the effectiveness of multiple imputation in recovering states, we can randomly filter locations then compare state recovery from a single most likely imputed track to states from multiple-imputed tracks. First, let's randomly filter 98 locations for each narwhal (in addition to the first or last locations so that the path length is the same),
+
+```{r sample_100_locs, attr.source = ".numberLines"}
+set.seed(1)
+# number of rows for each narwhal
+tracks_gps_sub <- tracks_gps_ls %>% 
+  lapply(function(x){
+    # number of rows for each narwhal
+    nrow <- nrow(x)
+    # rows to sample sorted chronologically
+    sub <- sort(c(1, nrow,  # first, last,
+                  sample(2:(nrow-1), 98)))  # random 98 from the middle
+    # sample selection
+    x[sub,]
+  }) %>% 
+  # convert back to a single data frame
+  do.call(rbind, .)
+```
+
+Next, lets fit a CTCRW to the sampled data (100 locs pre narwhal).
+
+```{r sample_crawl, attr.source = ".numberLines", cache=TRUE, message=FALSE}
+set.seed(3)
+# fit crawl
+crw_gps_sub <- crawlWrap(obsData = tracks_gps_sub, timeStep = "10 mins")
+# check that all parameters were estimated 
+crw_gps_sub$crwFits %>% 
+  lapply(function(x){
+    x[c("par","se","ci")] %>%  # get estimated values 
+      unlist() %>%  # unlist
+      is.nan() %>%  # identify values that failed to estimate
+      sum() == 0 # count failed estimates and ensure there are 0
+  })
+```
+
+Next, we can predict the most likely track using `prepData` on the CTCRW model, fit an HMM to this data using `fitHMM`, and calculate the proportion of decoded states that match the states predicted from the full data set.
+
+```{r sample_prep_fit, attr.source = ".numberLines", cache=TRUE, message=FALSE}
+# prep data
+prep_gps_sub <- prepData(data = crw_gps_sub)
+
+# Fit a 2 state HMM
+set.seed(1)
+HMM_gps_sub <- fitHMM(prep_gps_sub, nbState = 2, dist = dist, Par0 = Par0)
+
+# compare states
+sum(viterbi(HMM_gps_sub) ==
+      viterbi(HMM_gps_crw))/nrow(HMM_gps_sub$data)
+```
+
+In this case, it appears that there is only a $49\%$ overlap between the single imputation based on `r nrow(tracks_gps_sub)` sampled data points compared to HMM based on the `r nrow(tracks_gps)` data points in the original data. Given that there are only two states, $49\%$ is about what we would expect the model to estimate by random chance at all.
+
+As a comparison, let's generate and fit 80 simulated tracks from the CTCRW fit to the sampled `r nrow(tracks_gps_sub)` locations, then compare the states. With 80 simulations, the benefits of parallel processing become very apparent.
+
+Note, this code chunk can cause problems on some R version.
+
+```{r sample_MIfit, attr.source = ".numberLines", cache=TRUE, message=FALSE, eval=FALSE}
+set.seed(1)
+# fit MI HMM
+HMM_gps_sub_MI <- MIfitHMM(crw_gps_sub, nSims = 80, ncores = ncores,
+                           nbStates = 2, dist = dist, Par0 = Par0, fit = TRUE)
+
+# pool simulation results 
+MIpool_gps_sub <- MIpool(HMM_gps_sub_MI[[2]]) 
+plot(MIpool_gps_sub, animals = "T172062")  # plot first narwhal
+
+# compare states
+sum(MIpool_gps_sub$Par$states == 
+      viterbi(HMM_gps_crw))/nrow(prep_gps_crw) 
+```
+
+Using multiple imputation, we see that the state overlap increases from $49\%$ to $75\%$. On your own time, try increasing the number of simulations even more to see how the predictions change.
+
+
+# Bonus section B: Dealing with location error and irregular time
 
 Thus far, we have been using exclusively the GPS data, which can be assumed to have a negligible error in most applications. However, in many marine systems, we may obtain ARGOS locations, which can have highly variable location error on the order of hundreds of meters to hundreds of km. In addition, ARGOS data often provides location estimates in very irregular time intervals. `crawlWrap` can be used not only to predict impute missing data, but also to predict location when faced with high location error and irregular time-series.
 

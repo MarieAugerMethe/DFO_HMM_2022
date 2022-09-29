@@ -431,6 +431,11 @@ workshop material <strong>will not work without these</strong>. These
 can be installed <strong>after</strong> the latest GIS software has been
 installed.</p>
 <pre class="r"><code>install.packages(c(&#39;sf&#39;, &#39;terra&#39;, &#39;tmap&#39;), dep=TRUE)</code></pre>
+<p>We are trying to remove any usage of the package sp and raster (these
+are the packages that are now replaced by sf and terra), but since some
+of our original tutorials relied on these package, we suggest that you
+install them too for now.</p>
+<pre class="r"><code>install.packages(c(&#39;raster&#39;, &#39;sp&#39;), dep=TRUE)</code></pre>
 </div>
 <div id="packages-available-on-cran" class="section level3">
 <h3>Packages available on CRAN</h3>
@@ -440,6 +445,8 @@ be easily installed or updated via CRAN (using install.packages()):</p>
 <li>sf</li>
 <li>terra</li>
 <li>tmap</li>
+<li>raster</li>
+<li>sp</li>
 <li>momentuHMM</li>
 <li>dplyr</li>
 <li>tidyr</li>
@@ -464,6 +471,8 @@ properly installed by loading them.</p>
 <pre class="r"><code>library(sf)        # spatial data processing
 library(terra)     # raster data processing
 library(tmap)      # mapping spatial data
+library(sp)        # old spatial package
+library(raster)    # old raster package
 library(momentuHMM)# fitting HMMs
 library(dplyr)     # data management
 library(tidyr)     # data management
