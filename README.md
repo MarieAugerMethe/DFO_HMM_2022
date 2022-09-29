@@ -17,7 +17,6 @@ The workshop will be composed of three one-hour lectures and three three-hour tu
 - Integrating covariates on emission probabilities to model biased random walks 
 - Modelling behaviour using accelerometer data
 - Fitting hierarchical HMMs
-- 
 
 ## Prerequisite experience
 
