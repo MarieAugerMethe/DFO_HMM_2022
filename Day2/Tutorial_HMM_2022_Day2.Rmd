@@ -2,7 +2,7 @@
 title: "Hidden Markov Models: Missing data and multiple data streams"
 author: "Ron Togunov & Marie Auger-Méthé"
 output: 
-  bookdown::html_document2:
+  bookdown::html_document2: 
     number_sections: true
     highlight: tango
 editor_options:
@@ -354,7 +354,7 @@ For many applications, this model may be sufficient. However, the significant pr
 
 For later stages in this tutorial, I want to use the tracks predicted using this CRW method, so we will extract the predicted locations and add them to the observed data.
 
-```{r create_tracks_crw, message=FALSE}
+```{r create_tracks_crw, message=FALSE, attr.source = ".numberLines"}
 # filter predicted locations from predicted CRW model
 tracks_gps_crw <- data.frame(crw_gps_10$crwPredict) %>% 
     filter(locType == "p") %>% 
@@ -567,7 +567,7 @@ In section \@ref(bonus-MI), we investigate further the effectiveness of multiple
 
 One issue that may come up when implementing multiple imputation is "label switching". Label switching is when two or more HMMs converge to effectively the same (i.e., all parameter estimates are the same), but they assign a different state to the set of parameters. For example, one HMM defines state 1 as slow and state 2 as fast, while a second HMM defines state 1 as fast and state 2 as slow. This can occur if the states have similar parameters, if the initial starting parameters are far from the optimum, or the likelihood surface is noisy or complex. The key issue that may arise from label switching, is when pooling the results from multiple imputations, the summarized parameters or estimated states would be incorrect. The best strategy to preventing state label switching is to use pseudo-design matrices (pseudo-DM) in tandem with the `workBounds` argument when repeatedly fitting the same HMM. Pseudo-DMs operate by mapping working parameters (columns) to natural parameters (rows). Each distribution parameter (e.g., step length mean and SD) for each state must have precisely one corresponding row in the DM. For example, a two-state HMM, with one data stream (e.g., step length) that is defined by two parameters (e.g., mean and SD) must have 4 rows. If the parameters for each state are completely independent, the pseudo DM would look as follows:
 
-```{r DM_independent}
+```{r DM_independent, attr.source = ".numberLines"}
                 #  b1,b2,b3,b4
 stepDM <- matrix(c(1, 0, 0, 0,  # state 1 mean
                    0, 1, 0, 0,  # state 2 mean
@@ -623,7 +623,7 @@ stepDM; stepWB
 
 In this case, $\beta_1$ would represent the mean step length parameter for state 1, and the mean step length for state 2 would be represented by the sum of $\beta_1$ and $\beta_2$, where $\beta_2$ would be transformed to be \>0. Specifically, $\mu_1^{(l)} = exp(\beta_1)$ and $\mu_2^{(l)} = \exp(\beta_1 + \exp(\beta_2))$. Note: without specifying `workBounds`, $\beta_2$ would not be transformed, and state 2 could be slower than state 1 (i.e., if $\beta_2<0$, $\exp(\beta_1) > \exp(\beta_1 + \beta_2)$). For completeness, the following code integrates pseudo-DM and working constrains in an HMM fit multiple times using a multiple-imputation HMM (we will not run this).
 
-```{r DM_constraint_fit, eval=FALSE}
+```{r DM_constraint_fit, eval=FALSE, attr.source = ".numberLines"}
 # create named lists for DM and workBounds
 DM <- list(step = stepDM)
 WB <- list(step = stepWB)
@@ -801,7 +801,7 @@ The first three dive metrics have less missing data than the latter five, which 
 
 Second, we will plot a histogram for each dive metric to examine presence of multi-modality, balanced variation, and no over-dispersion. As the dive variables are zero-bound, we will apply a log transformation to all to better reflect the variation at the lower quantiles. 
 
-```{r data_structure2, fig.asp=1.5,attr.source = ".numberLines", cache=T}
+```{r data_structure2, fig.asp=1.5, attr.source = ".numberLines", cache=T}
 par(mfrow = c(4,2))
 # in the distirbution 
 hist(log(dives_sum$mean_dep), 100, 
@@ -1124,7 +1124,8 @@ HMM_StepTides$CIbeta$step[c("est", "lower", "upper")] %>%
   do.call(cbind, .) %>%  # cbind est, lower, and upper into a data.frame
   # add column for beta names
   data.frame(Parameter = colnames(HMM_StepTides$mle$step), .) %>%  
-  kable(digits = 3)  # output table with 3 decimal places on values
+    # output table with 3 decimal places on values
+  kable(digits = 3) %>% kable_styling()
 ```
 
 Based on the first plot and the negative and positive confidence intervals for `mean_1:htide`, it does not appear there is a relationship between tidal currents and speed for the resident state. However, there may be a positive relationship with speed for the travelling state. These results align with the prediction that narwhal movement is random relative to tides during the resident state and that movement tends to be with tidal current during the travelling state to save energy.
@@ -1159,7 +1160,7 @@ HMM_S2StepTides$CIbeta$step[c("est", "lower", "upper")] %>%
   do.call(cbind, .) %>%  # cbind into data.frame
   # add beta names
   data.frame(names = colnames(HMM_S2StepTides$mle$step), .) %>%  
-  kable(digits = 3)  # output table
+  kable(digits = 3) %>% kable_styling()  # output table
 ```
 
 Here, we see that tidal effects do appear to affect step length in state 2. As the observation data is the same between this model and the model in section \@ref(void-gaps), we can use AIC to compare models with and without tidal data.
@@ -1191,7 +1192,9 @@ DM <- list(step = stepDM)
 # fit HMM as in previous code chunk
 ```
 
-Note: adding dimension names is optional, but can help with interpretation. Remember, each row of the DM corresponds with the state-specific distribution parameters and each column represents the coefficients estimated by the model. A basic HMM without any covariates is effectively using a diagonal matrix of 1s. Multiple values in one row are multiplied by their respective beta coefficients, then added together, and then transformed using the link function (in this case, log for mean and SD). Mathematically, the above DM can be written as follows: \begin{equation} \label{eq:sl}
+Note: adding dimension names is optional, but can help with interpretation. Remember, each row of the DM corresponds with the state-specific distribution parameters and each column represents the coefficients estimated by the model. A basic HMM without any covariates is effectively using a diagonal matrix of 1s. Multiple values in one row are multiplied by their respective beta coefficients, then added together, and then transformed using the link function (in this case, log for mean and SD). Mathematically, the above DM can be written as follows: 
+\begin{equation} 
+\label{eq:sl}
   \begin{aligned}
       \log\mu_{S,t}^{(l)} &= 
         \begin{cases}
@@ -1215,10 +1218,11 @@ Note: adding dimension names is optional, but can help with interpretation. Reme
         \quad
         \begin{aligned}
         & \mathrm{if} \: S = \mathrm{resident}\\
-        & \mathrm{if} \: S = \mathrm{travel},\\
+        & \mathrm{if} \: S = \mathrm{travel}, 
         \end{aligned}
   \end{aligned}
-\end{equation}\
+  (\#eq:sl)
+\end{equation}
 where $\mu_S^{(l)}$ is the state-specific mean of step length, $\sigma_{S}^{(l)}$ is the state-specific SD of step length, $\beta_i \in (-\infty, \infty)$ are the coefficients estimated by the model, and $r^{(htide)}_t$ is the rate of horizontal tide movement at time $t$.
 
 ## Covariates on turning angle emission probability
@@ -1233,7 +1237,7 @@ In this section we will examine a basic BCRW where a narwhal moves parallel to t
 
 First will use the `earthtide` package to estimate the direction of tides; specifically, the eastward (`e_w_displacement`) and northward (`n_s_displacement`) components of tidal currents. As in the previous section, we must first project the data into WGS84:
 
-```{r project_gps_crw_4326, cashe = T}
+```{r project_gps_crw_4326, cashe = T, attr.source = ".numberLines"}
 tracks_gps_crw_wgs84 <- tracks_gps_crw %>% 
   st_as_sf(coords = c("x", "y")) %>% # converts to an sf object
   st_set_crs(2962) %>%  # specify projection of daat
@@ -1304,13 +1308,10 @@ DM <- list(angle = angleDM)
 In the above DM, we are effectively fixing the mean turning angle for state 1 to $0^\circ$ and stating that the mean direction of state 2 (travel) depends on the tide direction.
 
 Now, we will define the starting parameters for the model and fit the HMM. We must add two arguments to `fitHMM`. First, we must specify for which angular data streams we want to estimate the mean turning angle using `estAngleMean`. Second, when we are including covariates on the turning angle mean, we should also set `circularAngleMean` to `TRUE` for the turn angle. `circularAngleMean` will fit a special link function based on [Rivest et al. (2016)](https://rss.onlinelibrary.wiley.com/doi/pdf/10.1111/rssc.12124?casa_token=ABk2iWxpXjwAAAAA:aeQyQhMPO80TrT2fwQ8Zkus5byxa3hIrg-itGFQJw44oBzMq3MhiyR5d6kG4H4yazeHWKEEuIiZWxA):
-
-```{=tex}
-\begin{linenomath*} \begin{equation}  
-    \label{eq:BCRW.TAm}
-        \mu_{t}^{(\phi)} = \mathrm{atan2}(\alpha_{1} \sin \psi_t, 1 + \alpha_{1} \cos \psi_t) \\
-\end{equation}  \end{linenomath*}
-```
+\begin{equation}  
+\label{eq:BCRWTAm}
+  \mu_{t}^{(\phi)} = \mathrm{atan2}(\alpha_{1} \sin \psi_t, 1 + \alpha_{1} \cos \psi_t),  (\#eq:BCRWTAm)
+\end{equation}
 where $\psi_t \in (-\pi,\pi]$ is the observed angle of stimulus at $t$ relative to the movement bearing at $t-1$ and $\alpha_{1} \in (-\infty, \infty)$ is the bias coefficient in the direction $\psi_t$. In this model, when $\alpha_{1} = 0$, the model simplifies to a basic CRW with a turning angle mean centred at 0. However, as $\alpha_{1}$ increases (or becomes increasingly negative), the turning angle becomes increasingly governed by the stimulus (i.e., toward or away from the direction of stimulus) and less by directional persistence.
 
 ```{r prep_fit_HMM_S2AngleTides, attr.source = ".numberLines", cache=TRUE, message=FALSE}
@@ -1339,7 +1340,7 @@ HMM_S2AngleTides$CIbeta$angle[c("est", "lower", "upper")] %>%
   do.call(cbind, .) %>%  # cbind into data.frame
   # add beta names
   data.frame(names = colnames(HMM_S2AngleTides$mle$angle), .) %>%  
-  kable(digits = 3)  # output table
+  kable(digits = 3) %>% kable_styling()  # output table
 ```
 
 It is clear from the second plot, that the tidal direction estimated using the `earthtide` package does not explain much of observed turning angle given by the confidence intervals for `mean_2:tide` and the second plot. In the second figure, the x-axis represents the angle of tide relative to the previous step and the y-axis is the estimated turning angle. We see that when the tide angle is $0^\circ$, the expected mean turning angle is also $0^\circ$ (i.e., the tide is in the same direction as directional persistence and no turn is expected). Moving to the right, as the tide angle increases (i.e., rotates towards the left), the turning angle also increases (i.e., also turns towards the left). Conversely, as the tide angle decreases (i.e., right relative to the narwhal), the narwhal's turning angle also shifts to the right (negative values). However, throughout the plot, the estimated turning angle always encompasses $0^\circ$, suggesting there is not a strong relationship. This result makes sense as the `earthtide` package does not accurately represent tides in the complex coastline of Eclipse Sound, where waterways are angled in various directions (e.g., NBI, MI, TaS, and PI). ![Eclipse Sound map.](data/Eclipse_Sound_Map.jpg)
@@ -1402,6 +1403,8 @@ tracks_gps_crw_vect <- tracks_gps_crw_wgs84 %>%
 tracks_gps_crw_wgs84$land_dir <- 
   extract(land_dir, tracks_gps_crw_vect)[,"layer"]
 ```
+
+Note: if `extract` (from `terra`) gives you an error, you can use `raster::extract` instead.
 
 Now, we can prepare the data for `momentuHMM`and specify `land_dir` as the angular covariate.
 
@@ -1513,7 +1516,7 @@ HMM_AngleLand$CIbeta$angle[c("est", "lower", "upper")] %>%
   do.call(cbind, .) %>%  # cbind into data.frame
   # add beta names
   data.frame(names = colnames(HMM_AngleLand$mle$angle), .) %>%  
-  kable(digits = 3)  # output table
+  kable(digits = 3) %>% kable_styling()  # output table
 ```
 
 Given the confidence intervals to not include 0, it appears that at least some of narwhal orientation during travel is governed by the direction of the coastline. We can map these states with the coastline using `tmap`. For clarity, we will only plot one individual.
