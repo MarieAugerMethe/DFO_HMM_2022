@@ -40,13 +40,10 @@ paper:
 The primary learning objectives in this first tutorial are to:
 
 1. Fit simple HMMs using `momentuHMM`
-2. Interpolating missing locations
-    - Linear and correlated random walk interpolation 
-    - Voiding data gaps 
-    - Path segmentation 
-    - Multiple imputation
-3. Incorporating diving data-streams
-4. Incorporating covariates on emission probabilities
+2. Checking model fit
+3. Determining number of states to use
+4. Incorporating and interpreting covariates on behaviour transition probabilities
+5. Exploring effect of using different temporal resolutions
 
 ## Setup and data preparation
 
@@ -1244,8 +1241,6 @@ hist(sealPrep4$angle, breaks=40, add=TRUE,
      col=rgb(0,0,1,0.3), freq=FALSE, border = NA)
 hist(sealPrep8$angle, breaks=40, add=TRUE,
      col=rgb(0,1,1,0.3), freq=FALSE, border = NA)
-plot(density(sealPrep1$angle, na.rm = T))
-plot(density(sealPrep$angle, na.rm = T, col = "red"), add = T)
 
 # None is exactly 0 == surprising...
 sum(sealPrep1$angle == 0, na.rm = TRUE)
