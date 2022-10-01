@@ -1,8 +1,8 @@
 ---
-title: "Hidden Markov Models: Basics for animal movement data"
-author: "Marie Auger-Méthé"
-output:
-  html_document:
+title: 'Hidden Markov Models: Basics for animal movement data' 
+author: "Marie Auger-Méthé & Ron Togunov"
+output: 
+  bookdown::html_document2:
     number_sections: true
     highlight: tango
 editor_options:
@@ -10,12 +10,15 @@ editor_options:
 ---
 
 <!-- To be able to have continuous line numbers -->
+```{=html}
 <style>
 body
   { counter-reset: source-line 0; }
 pre.numberSource code
   { counter-reset: none; }
 </style>
+```
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -34,6 +37,17 @@ inclusion of covariates as raster layers, and much more, see associated
 paper:
 <https://besjournals.onlinelibrary.wiley.com/doi/abs/10.1111/2041-210X.12995>.
 
+The primary learning objectives in this first tutorial are to:
+
+1. Fit simple HMMs using `momentuHMM`
+2. Interpolating missing locations
+    - Linear and correlated random walk interpolation 
+    - Voiding data gaps 
+    - Path segmentation 
+    - Multiple imputation
+3. Incorporating diving data-streams
+4. Incorporating covariates on emission probabilities
+
 ## Setup and data preparation
 
 First, let's load the packages that we will need to complete the
@@ -41,8 +55,15 @@ analyses. Off course you need to have them installed first.
 
 ```{r Load packages, echo=TRUE, message=FALSE, attr.source = ".numberLines"}
 library(momentuHMM) # Package for fitting HMMs, builds on moveHMM
-library(sp) # For GIS tasks (e.g., geographic transformations)
-library(raster) # For raster spatial covariates
+library(raster) # For importing and extracting raster spatial covariates
+```
+
+While the raster package is being phased out in `favour` of the new `terra` package, `momentuHMM` still relies on the `raster` package to extract covariates. Therefore, for this tutorial we will still use `raster`, but do start working with `terra` in your work where possible for future compatability. 
+
+Make sure to set working directory to "Day1" of the HMM workshop folder:
+
+```{r, eval=FALSE, message=FALSE, attr.source = ".numberLines"}
+setwd("Day1")
 ```
 
 One of the main features of the data used with HMMs is that locations
@@ -123,8 +144,18 @@ ylab = "Lat", las = 1)
 # Add the original data
 points(seal$lon, seal$lat, pch = 19, cex = 0.5, col = rgb(1,
 0, 0, 0.5))
-
+# add legend
+legend(x = -62.4, y = 42.1, pch = c(19, 19),
+       legend = c("Original data", "Regularised locations"),
+       col = c("red", "black"))
 ```
+
+Here, we interpolated the location data to 2 hours. The resolution we 
+choose can have a significant effect on the results, so the this 
+decision must be made wisely. At the end of this tutorial, in section
+[Effects of interpolation]{#effect_of_int}. In tomorrow's tutorial, we 
+will review a more comprehensive strategy to select an appropriate 
+temporal resolution when we have irregular data. 
 
 Ok, we have now a regular time series of locations. For the most basic
 movement HMMs, you need to transform the time series of locations into
@@ -160,9 +191,9 @@ If we take a quick look at the data, we can see that the step lengths
 the names of the columns with the coordinates are now x and y, rather
 than `lon` and `lat`. We also have a new column: `ID`. In cases where
 you have multiple individuals, you would want your original data to have
-an `ID` column before being imputed in the `prepData` column. Note that
-the object it returns is from a specific S3 class defined in the
-`momentuHMM` package. This means that we can apply generic functions
+an `ID` column before being imputed in the `prepData` function. 
+Note that the object it returns is from a specific S3 class defined in 
+the `momentuHMM` package. This means that we can apply generic functions
 like `plot` to it and it will return specified outputs.
 
 ```{r, attr.source = ".numberLines"}
@@ -171,39 +202,43 @@ plot(sealPrep)
 
 We can see the track of the animal and the times series of the step
 lengths and turning angles, as well as the histograms of the step
-lengths and turning angles. Can you already identify patterns? \#\#
-Fitting the HMM
+lengths and turning angles. Can you already identify patterns? 
+
+## Fitting the HMM
 
 Now that our data is ready to use, we can fit the HMM. For this we use
 the function `fitHMM`. This is where we need to make many of our
 modelling decisions and most of these decisions will be associated with
-one of the arguments of the function. First, when we fit a HMM, we need
-to decide the number of behavioural states we are going to model. To
-start simple, we will only use two behavioural states. These could be,
-for example, representing one behaviour with fast and directed movement
-(e.g., travelling) and one behaviour with a more slow and tortuous
-movement (e.g., foraging). This mean that the argument `nbState` will be
-set to 2. Second, we need to decide whether we make the transition
-probabilities between the behavioural states dependent on covariates.
-Here again, we will start simple and we will not use covariates. That
-means that our formula argument will be `~1`. Third, we need to select
-the distribution we will use to model the step lengths and the one we
-will use to model the turning angles. For now, we will use the gamma
-distribution for the step length and the von Mises for the turning
-angles. This means that the argument dist will be set to:
-`list(step="gamma", angle="vm")`. Note that `dist` should be a list with
-an item for each data stream columns in the data that we are modelling
-(so here the column `step` and `angle`). The gamma distribution is
-strictly positive (i.e., it does not allow for 0s). If you have step
-lengths that are exactly zero in your data set, you need to use
-zero-inflated distributions. But in this case, we have no zeros. Let's
-check
+one of the arguments of the function. The minimum arguments `fitHMM`
+requires are: `fitHMM(data, nbState, dist, Par0)`. 
+
+First, when we fit a HMM, we need to decide the number of behavioural 
+states we are going to model. To start simple, we will only use two 
+behavioural states. These could be, for example, representing one 
+behaviour with fast and directed movement (e.g., travelling) and one 
+behaviour with a more slow and tortuous movement (e.g., foraging). This 
+mean that the argument `nbState` will be set to 2. Second, we need to 
+decide whether we make the transition probabilities between the 
+behavioural states dependent on covariates. Here again, we will start 
+simple and we will not use covariates. That means that our formula 
+argument will be `~1`. Third, we need to select the distribution we will
+use to model the step lengths and the one we will use to model the 
+turning angles. For now, we will use the gamma distribution for the step
+length and the von Mises for the turning angles. This means that the 
+argument dist will be set to: `list(step="gamma", angle="vm")`. Note 
+that `dist` should be a list with an item for each data stream columns 
+in the data that we are modelling (so here the column `step` and 
+`angle`). The gamma distribution is strictly positive (i.e., it does not
+allow for 0s). If you have step lengths that are exactly zero in your 
+data set, you need to use zero-inflated distributions. But in this case,
+we have no zeros. Let's check
 
 ```{r, attr.source = ".numberLines"}
 sum(sealPrep$step == 0, na.rm = TRUE)
 ```
 
-We are ok. We can ignore the zero-inflation.
+Since the sum is 0, we don't have any values of zero and don't need to 
+worry about modelling zero-inflation.
 
 By default, `fitHMM` will set the argument `estAngleMean` to `NULL`,
 which means that we assume that the mean angle is 0 for both behaviours
@@ -213,7 +248,7 @@ parameters control the extent to which the animal continues forward
 versus turn. Doing so reduces the number of parameters to estimate.
 These are all very important decisions that you must make when you
 construct your model. In addition, we need to specify initial values for
-the parameters to estimate. The HMMs are fitted using maximum likelihood
+the parameters to estimate. The HMMs are fit using maximum likelihood
 estimate (MLE) with a numerical optimizer. An unfortunate aspect of
 fitting models using numerical optimizers, is that, to be able to
 explore the parameter space and find the best parameter values for the
@@ -221,7 +256,7 @@ model, the optimizer needs to start somewhere. You need to decide where
 it starts. Unfortunately, choosing bad starting values can result in
 parameter estimates that are not the MLE, but just a local maximum. To
 choose your initial parameter you can take a quick peak at the data
-(e.g., using the plots above) and use some general biological
+(e.g., using the plots below) and use some general biological
 information. For example, it's common for animals to have one behaviour
 with long step lengths and small turning angles and one behaviour with
 short step lengths and larger turning angles. From the plots above, it
@@ -231,8 +266,8 @@ lengths around these values.
 
 ```{r, attr.source = ".numberLines"}
 plot(sealPrep$step ~
-sealPrep$date, ty = "l", ylab = "Step length",
-xlab = "Date", las = 1)
+       sealPrep$date, ty = "l", ylab = "Step length",
+     xlab = "Date", las = 1)
 abline(h = 0, col = rgb(1, 0, 0, 0.5))
 abline(h = 3, col = rgb(1, 0, 0, 0.5))
 abline(h = 7, col = rgb(1, 0, 0, 0.5))
@@ -271,17 +306,29 @@ sealHMM2s
 plot(sealHMM2s)
 ```
 
-Based on the mean step parameters, it looks like the first behavioural
-state (state 1) has really small step lengths compare to state 2. This
-is particularly easy to see in the step histogram, where the estimated
-distribution for each state is overlaid on top of the observed step
-length frequencies. Surprisingly, the turning angle distributions of the
-two states both indicate directed movement. In fact, the concentration
-parameter of state 1 is bigger than that of state 2. In the figure with
-the track, it looks like if we only have state 2. This is strange, since
-the transition probabilities estimated indicate that the animal remain
-in each behaviour for multiple steps (diagonal values of the transition
-probability matrix are \> 0.5). What's happening?
+Based on the mean step parameters, it looks like the first behavioural 
+state (state 1) has really small step lengths compare to state 2. This 
+is particularly easy to see in the step histogram (first figure), where 
+the estimated distribution for each state is overlaid on top of the 
+observed step length frequencies. Surprisingly, the turning angle 
+distributions of the two states both indicate directed movement (second 
+figure). In fact, the concentration parameter of state 1 is bigger than 
+that of state 2. In the last figure with the track, it looks like if we 
+only have state 2. This is strange, since the transition probabilities 
+estimated indicate that the animal remain in each behaviour for multiple
+steps (diagonal values of the transition probability matrix are \> 0.5).
+
+Part of what's happening may be that the locations of state 1 are hidden
+under state 2. We can see if this is the case by plotting state 2 with a
+higher transparency.
+
+```{r, attr.source = ".numberLines"}
+# plot it with transparency
+plot(sealHMM2s, col = c(rgb(230, 160, 20, max = 255), 
+                        rgb(80, 180, 230, alpha = 80, max = 255)))
+```
+
+Indeed, we are getting two states, but there is likely more going on. 
 
 # Identifying behavioural states
 
@@ -290,7 +337,7 @@ understand. Actually, we are interested in identifying when an animal is
 in each of the behavioural states (here when the animal is in state 1 vs
 state 2), something we call state decoding. To do so, we can use the
 function `viterbi`, which uses the Viterbi algorithm to produce the most
-likely sequence of states according to your fitted model and data.
+likely sequence of states according to your fit model and data.
 
 ```{r, cache=TRUE, attr.source = ".numberLines"}
 # Apply the Viterbi algorithm using your fited model object
@@ -350,7 +397,6 @@ mu02 <- c(5, 7) # Mean step length
 sigma02 <- c(5, 7) # Sd of the step length
 kappa02 <- c(1, 1) # Turning angle concentration parameter (kappa > 0)
 
-
 # Fit the same 2 state HMM
 sealHMM2s2 <- fitHMM(sealPrep,
                     nbState = 2,
@@ -366,7 +412,6 @@ estimates they each returned.
 ```{r, attr.source = ".numberLines"}
 # Negative log likelihood
 c(original = sealHMM2s$mod$minimum, new = sealHMM2s2$mod$minimum)
-
 
 # Parameter estimates
 cbind(sealHMM2s$mle$step, sealHMM2s2$mle$step)
@@ -400,7 +445,6 @@ Let's compare the results again.
 # Negative log likelihood
 c(original = sealHMM2s$mod$minimum, new = sealHMM2s2$mod$minimum,
   retryFits = sealHMM2sRF$mod$minimum)
-
 
 # Parameter estimates
 cbind(sealHMM2s$mle$step, sealHMM2s2$mle$step, sealHMM2sRF$mle$step)
@@ -438,10 +482,10 @@ cbind(sealHMM2s$mle$gamma, sealHMM2sW$mle$gamma)
 ```
 
 The negative log likelihood here is much larger than the negative log
-likelihood of the model fitted with the sensible starting values. Note
+likelihood of the model fit with the sensible starting values. Note
 also that some of the parameter estimates are exactly the same values as
 the initial values, which is always a sign of optimization problems.
-These are all signs that the model fitted with this new set of starting
+These are all signs that the model fit with this new set of starting
 values is not good. Sometimes, you will get error messages saying that
 `nlm` or `optim`, the functions that minimize the negative log
 likelihood, did not converged or that non-finite values were supplied to
@@ -456,14 +500,14 @@ simple model like the one we just explored.
 
 ## Pseudo-residuals
 
-Ok, we fitted a model to data, looks like the parameter estimates are
+Ok, we fit a model to data, looks like the parameter estimates are
 reliable, and we can get state probabilities, but is this a good model
 for our data? Can we use the model results? The best way to investigate
 model fit is through pseudo-residuals. Pseudo-residuals are a type of
 model residuals that account for the interdependence of observations.
 They are calculated for each of the time series (e.g., you will have
 pseudo-residuals for the step length time series and for the turning
-angle time series). If the fitted model is appropriate, the
+angle time series). If the fit model is appropriate, the
 pseudo-residuals produced by the functions `pseudoRes` should follow a
 standard normal distribution. You can look at pseudo-residuals directly
 via the function `plotPR`, which plots the pseudo-residual times-series,
@@ -724,14 +768,19 @@ Here a quick plot to convince you.
 # Create a new file, so we can see land better
 water <- bathy
 water[water >= 0] <- NA
-# Create color ramp to show bathymetry in blue gradients
-bluePal <- colorRampPalette(c(rgb(0,0,1), rgb(0.9,0.9,1)))
-plot(water, col=bluePal(50))
+# Create color ramp to show bathymetry in blue gradients 
+bluePal <- colorRampPalette(c(rgb(0.1,0.1,1), rgb(0.9,0.9,1)))
 
+# plot depth with land (NA) as grey
+plot(water, col = bluePal(50), colNA = "grey30")
 # Let's plot only the state 1
 points(sealPrep[viterbi(sealHMMb) == 1, c("x","y")],
-       col="#E69F00",
-       pch=19)
+       col = rgb(230, 160, 20, 12, max = 255),
+       pch = 19)
+# add legend 
+legend(x = -60.8, y = 40.3, pch=c(19, NA),
+       legend = c("State 1", "Land"), col = c("#E69F00", NA), 
+       fill = c(NA, "grey20"), border = NA)
 ```
 
 Ok, but it is a better model?
@@ -814,9 +863,9 @@ plotStationary(sealHMMdiurn)
 
 So it looks like there is a higher probability of being in state 2 (the
 foraging type of behaviour) at night and a peak in each of the other
-behaviours during different period of the day.
-
-<!-- Ask kim if the data is in UTC? -->
+behaviours during different period of the day. Some datasets are very 
+high resolution, and it's important to note that daily effects can only 
+be used when the data spans at least several days.
 
 Covariates can affect the state-dependent movement, by which I mean the
 characteristics of the movement in a given state. So for example, the
@@ -852,8 +901,6 @@ sealHMMdiurnDM
 plot(sealHMMdiurnDM, plotCI=TRUE)
 AIC(sealHMMb, sealHMMdiurn, sealHMMdiurnDM)
 ```
-
-<!-- could add plitCI above too, and discuss it. -->
 
 So here it looks like the seal makes more directed movement in state 1
 at night, makes more directed movement in state 2 early in the morning,
@@ -904,15 +951,13 @@ covariate relationships mean.
 If you have a model that has two behavioural states (state 1 and 2) and
 no covariates, you would have a transition probability matrix like this:
 
-
 \begin{equation}
 \mathbf{\Gamma} =
 \begin{pmatrix}
 \gamma_{11} & \gamma_{12}\\
-\gamma_{21} & \gamma_{22}
+\gamma_{21} & \gamma_{22} (\#eq:gamma)
 \end{pmatrix}
 \end{equation},
-
 
 where $\gamma_{ij}$ represent the probability of switching from i to j.
 For example, $\gamma_{11}$ represents the probability of staying in
@@ -946,21 +991,26 @@ probabilities are changing through time as a function of the covariate
 values at that time step. Specifically,
 
 
-\begin{equation}\label{linkFx}\gamma^{(t)}_{ij} = \frac{\exp(\eta_{ijt})}{\sum^N_{k=1}\exp(\eta_{ikt})},\end{equation}
-
+\begin{equation}
+\label{eq:linkFx}
+\gamma^{(t)}_{ij} = \frac{\exp(\eta_{ijt})}{\sum^N_{k=1}\exp(\eta_{ikt})}, (\#eq:linkFx)
+\end{equation}
 
 where
 
 
-\begin{equation}\label{covRel}\eta_{ijt} =\begin{cases}\beta_{0ij} + \sum^p_{l=1} \beta_{lij} w_{lt} & \text{if} \ i \neq j,\\0, & \text{otherwise},\end{cases}\end{equation}
+\begin{equation}
+\label{eq:covRel}
+\eta_{ijt} =\begin{cases}\beta_{0ij} + \sum^p_{l=1} \beta_{lij} w_{lt} & \text{if} \ i \neq j,\\0, & \text{otherwise},\end{cases}(\#eq:covRel)
+\end{equation}
 
 
 where $w_{lt}$ is the $l$-th covariate at time $t$ and $p$ is the number
-of covariates considered. Equation \ref{linkFx} is only a link
+of covariates considered. Equation \ref{eq:linkFx} is only a link
 function to insure that the transitions probabilities are between 0 and
 1 and that the row sum to 1. The important relationship between the
 covariates and the transition probabilities are in equation
-\ref{covRel}, where the $\beta_{0ij}$ is the base transition probability
+\ref{eq:covRel}, where the $\beta_{0ij}$ is the base transition probability
 for the switch from state $i$ to state $j$ that is not affected by the
 covariates. The $\beta_{lij}$ are the coefficient relating the
 transition probability to the $l$-th covariate. Note that $\eta_{ii}$
@@ -1070,11 +1120,11 @@ activity centers.
 You can model the observations with a set of different distributions. To
 change the distribution simply requires changing the argument `dist` in
 the function `fitHMM`. In the example above, we used the gamma
-distribution (using the name`"`gamma`") for the step length. However,
+distribution (using the name `"gamma"`) for the step length. However,
 you can use a variety of alternative distribution, including: Weibull
-("`weibull`") and exponential ("`exp`"). Similarly, we used the von
-Mises (named"`vm`") for the turning angle distribution, but one could
-use the wrapped Cauchy (`wrpcauchy`).
+(`"weibull"`) and exponential (`"exp"`). Similarly, we used the von
+Mises (named `"vm"`) for the turning angle distribution, but one could
+use the wrapped Cauchy (`"wrpcauchy"`).
 
 Explore whether changing the distribution affects the fit of the model.
 Use AIC to compare the different models. Use the `plot` and `viterbi`
@@ -1133,7 +1183,7 @@ positive distribution of your choice (e.g., the gamma). This can be
 achieved by adding a zero-mass starting value for each state in the step
 parameters (see the help page of `fitHMM` under the argument `Par0`).
 
-## Effects of interpolation
+## Effects of interpolation {#effect_of_int}
 
 The seal data we are using is not regular, by which I mean that the
 locations are not taken at regular time intervals. As a quick trick we
@@ -1141,10 +1191,10 @@ regularised the data to 2 hours intervals using linear interpolation,
 but this is likely to affect the analysis. Here, explore the effects of
 using different time intervals. For example, look at the results when
 using 1, 4, 8 hours intervals. Look at both the fit of the model and the
-pseudo residuals.
+pseudo residuals. We commented out the plots for space, but do run them 
+to visualise the effect of resolution on the data and results.
 
 ```{r, attr.source = ".numberLines", cache=TRUE}
-
 # Let's try different time intervals
 # 1 hr
 ti1 <- seq(seal$date[1], seal$date[length(seal$date)], by=60*60)
@@ -1185,15 +1235,17 @@ sealPrep1 <- prepData(sealreg1, type="LL", coordNames = c("lon", "lat"))
 sealPrep4 <- prepData(sealreg4, type="LL", coordNames = c("lon", "lat"))
 sealPrep8 <- prepData(sealreg8, type="LL", coordNames = c("lon", "lat"))
 
-# hist(sealPrep1$angle, breaks=20,
-#      col=rgb(1,0,0,0.5), freq=FALSE,
-#      ylim=c(0,1), las=1)
-# hist(sealPrep$angle, breaks=20, add=TRUE,
-#      col=rgb(0.8,0.8,0.8,0.5), freq=FALSE)
-# hist(sealPrep4$angle, breaks=20, add=TRUE,
-#      col=rgb(0,0,1,0.5), freq=FALSE)
-# hist(sealPrep8$angle, breaks=20, add=TRUE,
-#      col=rgb(0,1,1,0.5), freq=FALSE)
+hist(sealPrep1$angle, breaks=40,
+     col=rgb(1,0,0,1), freq=FALSE,
+     ylim=c(0,2), las=1, border = NA)
+hist(sealPrep$angle, breaks=40, add=TRUE,
+     col=rgb(0.8,0.8,0.8,0.8), freq=FALSE, border = NA)
+hist(sealPrep4$angle, breaks=40, add=TRUE,
+     col=rgb(0,0,1,0.3), freq=FALSE, border = NA)
+hist(sealPrep8$angle, breaks=40, add=TRUE,
+     col=rgb(0,1,1,0.3), freq=FALSE, border = NA)
+plot(density(sealPrep1$angle, na.rm = T))
+plot(density(sealPrep$angle, na.rm = T, col = "red"), add = T)
 
 # None is exactly 0 == surprising...
 sum(sealPrep1$angle == 0, na.rm = TRUE)
