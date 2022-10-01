@@ -2,7 +2,7 @@
 
 ## Description and format
 
-  This workshop was developed by Marie Auger-Méthé, Vianey Leos-Barajas, Ron Togunov, and Marco Antonio Gallegos Herrada for the Department of Fisheries and Oceans, Canada in October 2022. The goal of the workshop is to illustrate the application of hidden Markov models (HMMs) to movement data from marine animals to classify behaviours and identify behaviour-specific habitat associations. 
+  This workshop was developed by Marie Auger-Méthé, Vianey Leos Barajas, Ron Togunov, and Marco Antonio Gallegos Herrada for the Department of Fisheries and Oceans, Canada in October 2022. The goal of the workshop is to illustrate the application of hidden Markov models (HMMs) to movement data from marine animals to classify behaviours and identify behaviour-specific habitat associations. 
 
 The workshop will be composed of three one-hour lectures and three three-hour tutorials in R. These lecture can be found on our youtube channel: https://www.youtube.com/playlist?list=PLYkxNfKA95Pzcp5xfJdQKl6xLQoXrP39x  
 Each tutorial will be completed together over zoom and will begin with a 10-minute introduction over Zoom that will provide an overview of the tutorial objectives. 
