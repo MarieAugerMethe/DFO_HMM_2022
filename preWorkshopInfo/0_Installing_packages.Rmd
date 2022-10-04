@@ -51,7 +51,7 @@ sudo apt install build-essential
 **The workshop is developed with latest version of gdal and geos. The workshop material will not work without them or if you are using outdated versions of these.** 
 
 If you do not have these software already installed, please install them (see below). **If you already have `rgdal` and gdal installed, verify that the version that's already installed is adequate. Load the `rgdal` package and use the function rgdal function `GDALis3ormore()` in R. It should return TRUE. We want gdal to use the appropriate PROJ transformation software ([proj.org](https://proj.org/)), so in addition the rgdal function `PROJis6ormore()` should return TRUE. If either return FALSE, update your gdal.**
-*Note new version of some of these GIS software and packages (e.g., sp) have made significant changes and might affect other code.*
+*Note new version of some of these GIS software and packages (e.g., raster) have made significant changes and might affect other code.*
 
 
 On Mac, installing these is easiest done using homebrew ([brew.sh](https://brew.sh/)). With homebrew installed, open terminal and run:
@@ -82,22 +82,18 @@ The latest version of sf and terra are **required**. The workshop material **wil
 install.packages(c('sf', 'terra', 'tmap'), dep=TRUE)
 ```
 
-We are trying to remove any usage of the package sp and raster (these are the packages that are now replaced by sf and terra), but since some of our original tutorials relied on these package, we suggest that you install them too for now.
+We are trying to remove any usage of the package raster (this package is now replaced by terra), but since momentuHMM still uses raster, it is sometimes easier to use functions from the raster package.
+Thus, please install raster.
 
 ```{r, eval=FALSE}
-install.packages(c('raster', 'sp'), dep=TRUE)
+install.packages('raster', dep=TRUE)
 ```
 
 
-### Packages available on CRAN
+### Packages available on CRAN without special dependencies
 
 The remaining packages do not have special dependencies, and should be easily installed or updated via CRAN (using install.packages()):
 
-+ sf
-+ terra
-+ tmap
-+ raster
-+ sp
 + momentuHMM
 + dplyr
 + tidyr
