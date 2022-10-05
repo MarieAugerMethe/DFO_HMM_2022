@@ -1181,7 +1181,7 @@ parameters (see the help page of `fitHMM` under the argument `Par0`).
 
 ## Effects of interpolation {#effect_of_int}
 
-The seal data we are using is not regular, by which I mean that the
+The seal data we are using is not regular, by which we mean that the
 locations are not taken at regular time intervals. As a quick trick we
 regularised the data to 2 hours intervals using linear interpolation,
 but this is likely to affect the analysis. Here, explore the effects of
