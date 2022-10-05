@@ -902,6 +902,7 @@ AIC(sealHMMb, sealHMMdiurn, sealHMMdiurnDM)
 So here it looks like the seal makes more directed movement in state 1
 at night, makes more directed movement in state 2 early in the morning,
 and makes more directed movement in state 3 early in the morning.
+But the CIs are wide and according to AIC, the bathymetry model outperform this model. 
 
 Note that we can combine various covariates. For example, here we are
 going to combine bathymetry and time of day.
