@@ -518,7 +518,7 @@ the step length time series particularly well. The ACF indicates that
 there is severe autocorrelation remaining in the time series, even after
 accounting for the persistence in the underlying behavioural states.
 
-This could indicate that there is more hidden behavioural states. Let's
+This could indicate that there are more hidden behavioural states. Let's
 try a 3-state HMMs.
 
 ```{r message=FALSE, cache=TRUE, attr.source = ".numberLines"}
