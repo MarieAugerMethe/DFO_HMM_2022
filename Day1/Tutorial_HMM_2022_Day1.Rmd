@@ -954,8 +954,8 @@ no covariates, you would have a transition probability matrix like this:
 \begin{pmatrix}
 \gamma_{11} & \gamma_{12}\\
 \gamma_{21} & \gamma_{22} (\#eq:gamma)
-\end{pmatrix}
-\end{equation},
+\end{pmatrix},
+\end{equation}
 
 where $\gamma_{ij}$ represent the probability of switching from i to j.
 For example, $\gamma_{11}$ represents the probability of staying in
