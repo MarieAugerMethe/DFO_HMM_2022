@@ -71,7 +71,7 @@ reprocessing, HMMs are not particularly good for irregular times series
 of locations or locations with large measurement error (e.g., you would
 need to preprocess Argos data before applying HMMs).
 
-I work mainly on aquatic species, and unfortunately, movement of aquatic
+Unfortunately, movement of aquatic
 species is rarely taken at regular time intervals and without
 measurement error. For example, the data set we will work on, is the
 movement track of a grey seal tagged with a Fastlock GPS tag. This is a
@@ -95,12 +95,11 @@ longitude, and lat with latitude. It's clear from the date column that
 the locations are taken at irregular time intervals. So just like in
 Whoriskey et al. 2017, we will regularize it. Note, that `momentuHMM`
 has functions to preprocess irregular movement time series and/or time
-series with large measurement errors (e.g., `crawlWrap`). However, these
-functions are much more complex, they fit state-space models to the
-data, and we will not cover these in this tutorial. Some of the material
-covered in the state-space model tutorial will help understand these
-functions, but you can also see the vignette of `momentuHMM` to learn
-more about the preprocessing functions available. For now, as in
+series with large measurement errors (e.g., `crawlWrap`). 
+However, these
+functions are much more complex. 
+We will cover some of these functions in tomorrow's tutorial.
+For now, as in
 Whoriskey et al. 2017, we will assume that the animal moves in a
 straight line and at constant speed between two locations and
 interpolate the location at regular time intervals based this
@@ -160,7 +159,7 @@ two time-series: one which represents the step lengths (distance between
 two locations) and one that represents the turning angle (angle between
 two steps). The package `momentuHMM` has a function that does that:
 `prepData`. The data is in latitude and longitude and I'm assuming using
-WGS84. You can use `prepData` on latitude and longitude data 1 or on
+WGS84. You can use `prepData` on latitude and longitude data or on
 projected data (e.g., UTM). `prepData` can do much more, and we will see
 some other features later, but for now the arguments that we need to
 think about are:
