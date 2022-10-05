@@ -973,9 +973,9 @@ sealHMM2s
 ```
 
 We can see that the probability of switching in state 2 if you are in
-state 1 is `r round(sealHMM2s$mle$gamma[1,2],2)` and so the probability
+state 1 is $\approx `r round(sealHMM2s$mle$gamma[1,2],2)`$ and so the probability
 of staying in state 1 is
-`r 1-round(sealHMM2s$mle$gamma[1,2],2)`=`r round(sealHMM2s$mle$gamma[1,1],2)`.
+$\approx `r round(sealHMM2s$mle$gamma[1,1],2)`$.
 The same logic applies to the probability of staying or switching from
 state 2. This means that for a model with $N$ behavioural states, we
 only need to estimate $N (N-1)$ transition probabilities (so 2 for the
