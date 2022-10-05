@@ -813,7 +813,7 @@ sealPrep$hour <- as.integer(strftime(sealPrep$date, format = "%H", tz="Etc/GMT+4
 ```
 
 Here again we can make the covariate affect the transition
-probabilities. The difference, is that we have to use a more complex
+probabilities. The difference is that we have to use a more complex
 function that represents the cyclical nature of time of day. This is the
 `cosinor` function. For more information on the `cosinor` function, see
 mathy section below.
