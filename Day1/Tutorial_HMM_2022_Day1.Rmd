@@ -990,7 +990,6 @@ values at that time step. Specifically,
 
 
 \begin{equation}
-\label{eq:linkFx}
 \gamma^{(t)}_{ij} = \frac{\exp(\eta_{ijt})}{\sum^N_{k=1}\exp(\eta_{ikt})}, (\#eq:linkFx)
 \end{equation}
 
@@ -998,17 +997,16 @@ where
 
 
 \begin{equation}
-\label{eq:covRel}
 \eta_{ijt} =\begin{cases}\beta_{0ij} + \sum^p_{l=1} \beta_{lij} w_{lt} & \text{if} \ i \neq j,\\0, & \text{otherwise},\end{cases}(\#eq:covRel)
 \end{equation}
 
 
 where $w_{lt}$ is the $l$-th covariate at time $t$ and $p$ is the number
-of covariates considered. Equation \ref{eq:linkFx} is only a link
-function to insure that the transitions probabilities are between 0 and
+of covariates considered. Equation \@ref(eq:linkFx) is only a link
+function to ensure that the transitions probabilities are between 0 and
 1 and that the row sum to 1. The important relationship between the
 covariates and the transition probabilities are in equation
-\ref{eq:covRel}, where the $\beta_{0ij}$ is the base transition probability
+\@ref(eq:covRel), where the $\beta_{0ij}$ is the base transition probability
 for the switch from state $i$ to state $j$ that is not affected by the
 covariates. The $\beta_{lij}$ are the coefficient relating the
 transition probability to the $l$-th covariate. Note that $\eta_{ii}$
@@ -1151,8 +1149,8 @@ sealHMMwb <- fitHMM(sealPrep, nbState = 2, dist=list(step="weibull", angle="vm")
        Par0 = list(step=c(mu0,sigma0), angle=kappa0))
 
 AIC(sealHMM2s,sealHMMwb) # Weibull is better
-#plot(sealHMMwb) # Doesn't have a big effect
-sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMwb)))/nrow(sealPrep) # Only 27 (2%) different states
+plot(sealHMMwb) # Doesn't have a big effect
+sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMwb)))/nrow(sealPrep) # Only 2 different states (< 1% difference)
 
 #### Exponential for step length
 mu0 <- c(2, 1) # Rate - has one less parameters
