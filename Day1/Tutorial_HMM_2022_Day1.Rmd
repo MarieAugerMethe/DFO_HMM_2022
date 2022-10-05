@@ -677,7 +677,7 @@ The main argument of the `fitHMM` function that we need to change are
 the `formula` and the starting values (because we have 6 new parameters
 to estimate). The default value for the `formula` is $\sim 1$, which
 means that the transition probability are not affected by covariates.
-Here, we want to indicate that the transition probability are affected
+Here, we want to indicate that the transition probabilities are affected
 by the bathymetry. We can use the function `getPar0` to help us find
 starting values based on our simpler 3-state HMMs. This might be a bit
 of an overkill for this model, as `getPar0` will set the starting values
