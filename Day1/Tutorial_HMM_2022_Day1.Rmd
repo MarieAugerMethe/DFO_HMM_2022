@@ -1165,8 +1165,8 @@ sealHMMexp <- fitHMM(sealPrep, nbState = 2,
 
 ```{r, attr.source = ".numberLines"}
 AIC(sealHMM2s, sealHMMwb,sealHMMexp) # Exponential is worst
-#plot(sealHMMexp) # It has a bit more of an effect
-sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMexp)))/nrow(sealPrep) # 128 different states (12%)
+plot(sealHMMexp) # It has a bit more of an effect
+sum(abs(viterbi(sealHMM2s) - viterbi(sealHMMexp)))/nrow(sealPrep) # 4 different states (< 1%)
 ```
 
 Many of the distributions, including the gamma distribution, are
