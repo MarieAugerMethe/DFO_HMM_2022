@@ -560,9 +560,10 @@ We can also use the function `simData` to look at whether the movement
 produced by the models is similar to the observed movement. Let's
 simulate the 3-state HMMs, and then fit it to be able to identify the
 behavioural states. Note that we could just plot directly the simulated
-data, rather than estimating the fitting the model and predicting the
-states. This might require a bit of fiddling (A good thing to know is
-that the colour paletter used by the packages is:
+data and colour code the state, rather than estimating the fitting the model and predicting the
+states and plotting the predicted states. 
+However, plotting the simulated data might require a bit of fiddling (A good thing to know is
+that the colour palette used by the packages is:
 `c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")`).
 One way fitting the model to the simulated data may be useful is in
 identifying whether you have enough data to estimate your parameters
@@ -589,7 +590,7 @@ sealHMM3s
 
 Looks similar, except maybe that the real seal goes back and forth to
 some of the same locations, something not captured in the simulation.
-The parameter estimates are closed to those used to simulate the data,
+The parameter estimates are close to those used to simulate the data,
 which is good.
 
 ## Confidence intervals
