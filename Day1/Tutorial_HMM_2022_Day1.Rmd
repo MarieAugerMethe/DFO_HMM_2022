@@ -557,7 +557,7 @@ areas.
 ## Simulating data
 
 We can also use the function `simData` to look at whether the movement
-produce by the models is similar to the observed movement. Let's
+produced by the models is similar to the observed movement. Let's
 simulate the 3-state HMMs, and then fit it to be able to identify the
 behavioural states. Note that we could just plot directly the simulated
 data, rather than estimating the fitting the model and predicting the
