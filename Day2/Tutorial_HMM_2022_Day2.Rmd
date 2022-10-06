@@ -540,7 +540,7 @@ mute <- mapply(function(data, col) {
 
 Notice how in some areas the different simulations have generally good agreement in the likely location during gaps, while in others they diverge. Multiple imputation can be particularly powerful if we want to incorporate environmental variables, as spatially explicit variables can be extracted for each simulated track to sample the most likely conditions encountered by the animal.
 
-As you can imagine, fitting multiple imputations can take quite a bit of time. We can speed up the computation by simulating/fitting each track in parallel using the `ncores` argument. We can identify the number of cores our PC has using `parallel::detectCores()`.
+As you can imagine, fitting multiple imputations can take quite a bit of time. We can speed up the computation by simulating/fitting each track in parallel using the `ncores` argument. We can identify the number of cores our computer has using `parallel::detectCores()`.
 
 ```{r count_ncores, attr.source = ".numberLines"}
 # count number of available cores and use 60% of available cores
@@ -621,7 +621,7 @@ stepWB <- matrix(c(-Inf, 0,  -Inf, -Inf,   # lower bounds
 stepDM; stepWB
 ```
 
-In this case, $\beta_1$ would represent the mean step length parameter for state 1, and the mean step length for state 2 would be represented by the sum of $\beta_1$ and $\beta_2$, where $\beta_2$ would be transformed to be \>0. Specifically, $\mu_1^{(l)} = exp(\beta_1)$ and $\mu_2^{(l)} = \exp(\beta_1 + \exp(\beta_2))$. Note: without specifying `workBounds`, $\beta_2$ would not be transformed, and state 2 could be slower than state 1 (i.e., if $\beta_2<0$, $\exp(\beta_1) > \exp(\beta_1 + \beta_2)$). For completeness, the following code integrates pseudo-DM and working constrains in an HMM fit multiple times using a multiple-imputation HMM (we will not run this).
+In this case, $\beta_1$ would represent the mean step length parameter for state 1, and the mean step length for state 2 would be represented by the sum of $\beta_1$ and $\beta_2$, where $\beta_2$ would be defined to be \>0. Specifically, $\mu_1^{(l)} = exp(\beta_1)$ and $\mu_2^{(l)} = \exp(\beta_1 + \exp(\beta_2))$. Note: without specifying `workBounds`, $\beta_2$ would not be defined to be \>0, and state 2 could be slower than state 1 (i.e., if $\beta_2<0$, $\exp(\beta_1) > \exp(\beta_1 + \beta_2)$). For completeness, the following code integrates pseudo-DM and working constrains in an HMM fit multiple times using a multiple-imputation HMM (we will not run this).
 
 ```{r DM_constraint_fit, eval=FALSE, attr.source = ".numberLines"}
 # create named lists for DM and workBounds
