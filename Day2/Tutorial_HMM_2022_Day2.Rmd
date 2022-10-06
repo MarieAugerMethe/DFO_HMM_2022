@@ -649,8 +649,7 @@ First, let's import and view the dive data.
 
 ```{r import_depth_data, warning=FALSE, attr.source = ".numberLines"}
 dives <- read.csv("data/dives.csv") %>% 
-  mutate(time = ymd_hms(time)) %>% 
-  filter(month(time) == 8, day(time) > 7,  day(time) <= 14)
+  mutate(time = ymd_hms(time)) 
 
 head(dives)
 table(dives$dt)
