@@ -184,7 +184,7 @@ We will be able to exclude very large data gaps that contribute large numbers of
 
 There are several ways to deal with data gaps, and I will address four:
 
-1.  Interpolation (linear and statistical)
+1.  Interpolation (linear and correlated random walk)
 2.  Voiding data gaps
 3.  Path segmentation
 4.  Multiple imputation
@@ -207,12 +207,12 @@ tracks_gps_ls <- tracks_gps %>%
 
 For large datasets with few and small gaps, the simplest approach is to use linear interpolation. First, let's identify the minute for which we have most of the data.
 
-```{r identify_most_freq_dt, attr.source = ".numberLines", message = FALSE}
+```{r identify_most_freq_dt, attr.source = ".numberLines", message = FALSE, cache=TRUE}
 # which minute has the most data
 tracks_gps %>% 
   st_drop_geometry() %>%  # convert back to data.frame
   group_by(ID) %>% 
-  summarise(minute = str_sub(minute(time), -1)) %>% 
+  summarise(minute = str_sub(minute(time), -1)) %>% # gets the last minute, e.g. str_sub("37", -1) returns 7
   table() %>% 
   # create formatted table
   kable() %>% kable_styling() %>% 
