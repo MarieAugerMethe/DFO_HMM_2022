@@ -273,6 +273,8 @@ summary(tigerSharkData, dataNames = names(tigerSharkData)[-1])
 
 ```
 
+Note that 2i indicates the initial distribution in the fine state level for every time in the coarse state level, and 2 indicates the observations for the fine state level.
+
 However, one of the difficulties with hierarchical HMMs is the construction of the number of states, just like in regular HMMs! Here we choose three fine-scale states as that has been tested for this data to produce the best compromise between model fit and model complexity, and two coarse-scale states. 
 
 ```{r}
