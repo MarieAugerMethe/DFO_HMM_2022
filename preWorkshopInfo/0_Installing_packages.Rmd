@@ -109,6 +109,7 @@ The remaining packages do not have special dependencies, and should be easily in
 + mitools
 + doFuture
 + kableExtra
++ data.tree
 
 ### Check that all packages are installed
 
@@ -135,4 +136,5 @@ library(car)       # additional operations to Applied Regression
 library(mitools)   # parallel processing
 library(doFuture)  # parallel processing
 library(kableExtra)# produce visually appealing tables
+library(data.tree)
 ```
