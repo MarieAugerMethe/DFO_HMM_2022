@@ -137,4 +137,5 @@ library(mitools)   # parallel processing
 library(doFuture)  # parallel processing
 library(kableExtra)# produce visually appealing tables
 library(data.tree)
+library(DiagrammeR)
 ```
