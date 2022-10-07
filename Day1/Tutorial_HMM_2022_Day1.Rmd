@@ -55,7 +55,7 @@ library(momentuHMM) # Package for fitting HMMs, builds on moveHMM
 library(raster) # For importing and extracting raster spatial covariates
 ```
 
-While the raster package is being phased out in `favour` of the new `terra` package, `momentuHMM` still relies on the `raster` package to extract covariates. Therefore, for this tutorial we will still use `raster`, but do start working with `terra` in your work where possible for future compatability. 
+While the `raster` package is being phased out in favour of the new `terra` package, `momentuHMM` still relies on the `raster` package to extract covariates. Therefore, for this tutorial we will still use `raster`, but do start working with `terra` in your work where possible for future compatability. 
 
 Make sure to set working directory to "Day1" of the HMM workshop folder:
 
