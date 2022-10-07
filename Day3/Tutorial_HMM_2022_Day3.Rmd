@@ -157,9 +157,13 @@ fit1_s2_long <- fitHMM(BlacktipBData,
 fit1_s2_long
 ```
 
+Let's look at the pseudo-residuals.
+
 ```{r}
 plotPR(fit1)
 ```
+
+We can see that there is high autocorrelation and that some deviation from normality.
 
 We can also compute the most likely sequence of states. What can we infer from this? Is there something else we can say from this? According to fitted model, can we see if there is any interesting pattern?
 
