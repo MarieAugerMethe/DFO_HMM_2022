@@ -88,7 +88,9 @@ BlacktipB = BlacktipB %>% filter(ODBA <= 2.0)
 
 ```
 
-And now, the modified time series with values above 2.0 removed. Now, we are ready to start to look for models for this data!
+And now, the modified time series with values above 2.0 removed. Note that here we ignore the fact that we do not have data for these time points.
+
+Now, we are ready to start to look for models for this data!
 
 ```{r, echo=F}
 BlacktipB %>% ggplot(aes(Time,ODBA)) + geom_line()
@@ -112,7 +114,6 @@ As we have indicated before, the best way to start when fitting a hidden Markov 
 Now that the data is ready for modeling, we choose to fit a 2-state hidden Markov model. For this purpose, we first need to assign the class `momentuHMMData` to the data in order to be presentable for the functions related to `momentuHMM`.
 
 ```{r}
-
 BlacktipBData = prepData(BlacktipB,coordNames = NULL,
                    covNames = "hour_to_sec")
 
@@ -121,7 +122,6 @@ BlacktipBData = prepData(BlacktipB,coordNames = NULL,
 Let's fit our model and take a look at the output of the fitted model. 
 
 ```{r, cache=TRUE}
-
 fit1 = fitHMM(BlacktipBData,nbStates=2,dist=list(ODBA="gamma"),Par0 = list(ODBA=c(.1,.3,1,1)))
 
 fit1
@@ -131,7 +131,24 @@ We can also plot the results to obtain a visual representation of the fitted mod
 
 ```{r}
 plot(fit1,breaks = 80)
+```
 
+Let's look at the pseudo-residuals.
+
+```{r}
+plotPR(fit1)
+```
+
+We can also compute the most likely sequence of states.
+
+```{r, cache=TRUE}
+# identify most likely state using the Viterbi algorithm
+BlacktipB$state <- viterbi(fit1)
+
+# proportion of the behaviour states during the observed period
+table(BlacktipB$state)/length(BlacktipB$state)
+
+BlacktipB %>% mutate(day = day(Time)) %>% ggplot(aes(Time,state)) + facet_wrap(~day,scales = "free_x") + geom_point()
 ```
 
 Let's include retryFits in the fitHMM function. This can take time to run.
@@ -143,6 +160,7 @@ fit1_s2 <- fitHMM(BlacktipBData,
                   dist=list(ODBA="gamma"),
                   Par0 = list(ODBA=c(.1,.3,1,1)),
                   retryFits=10)
+fit1_s2
 ```
 
 Seems nothing changed at all!
@@ -153,7 +171,7 @@ Now let's go further and include a high perturbation in one of the initial value
 fit1_s2_long <- fitHMM(BlacktipBData,
                   nbState = 2,
                   dist=list(ODBA="gamma"),
-                  Par0 = list(ODBA=c(.1,1,1,1)))
+                  Par0 = list(ODBA=c(.1,2,1,1)))
 
 fit1_s2_long
 ```
@@ -161,25 +179,27 @@ fit1_s2_long
 Let's look at the pseudo-residuals.
 
 ```{r}
-plotPR(fit1)
+plotPR(fit1_s2_long)
 ```
 
-We can see that there is high autocorrelation and that some deviation from normality.
+You may get warnings.
+
+We can see that there is high autocorrelation and some deviation from normality.
 
 We can also compute the most likely sequence of states. What can we infer from this? Is there something else we can say from this? According to fitted model, can we see if there is any interesting pattern?
 
 ```{r, cache=TRUE}
 # identify most likely state using the Viterbi algorithm
-BlacktipB$state <- viterbi(fit1)
+BlacktipB$state_wildPar0 <- viterbi(fit1_s2_long)
 
 # proportion of the behaviour states during the observed period
-table(BlacktipB$state)/length(BlacktipB$state)
+table(BlacktipB$state_wildPar0)/length(BlacktipB$state_wildPar0)
 
-BlacktipB %>% mutate(day = day(Time)) %>% ggplot(aes(Time,state)) + facet_wrap(~day,scales = "free_x") + geom_point()
+BlacktipB %>% mutate(day = day(Time)) %>% ggplot(aes(Time,state_wildPar0)) + facet_wrap(~day,scales = "free_x") + geom_point()
 
 ```
 
-
+Here we can see that there is only one state when we use these new starting values, this is an indication that there may be problems.
 
 # Incorporating covariates
 
