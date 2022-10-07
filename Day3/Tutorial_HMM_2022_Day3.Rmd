@@ -129,12 +129,11 @@ fit1
 We can also plot the results to obtain a visual representation of the fitted model.
 
 ```{r}
-
 plot(fit1,breaks = 80)
 
 ```
 
-Let's include retryFits in the fitHMM function. 
+Let's include retryFits in the fitHMM function. This can take time to run.
 
 ```{r, cache=TRUE}
 set.seed(147)
