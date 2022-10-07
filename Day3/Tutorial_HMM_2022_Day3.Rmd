@@ -308,7 +308,7 @@ hierStates <- data.tree::as.Node(list(name="tiger shark HHMM states",
 ```
 
 
-he name for any of the “children” added to a node are user-specified and are akin
+The name for any of the “children” added to a node are user-specified and are akin
 to the stateNames argument in fitHMM for a standard HMM. While these names are
 arbitrary, the name and state attributes must be unique.
 
@@ -325,8 +325,7 @@ plot(hierDist)
 
 ```
 
-The Node attribute dist is required in hierDist and specifies the probability dis-
-tribution for each data stream at each level of the hierarchy (Figure 14. In this case,
+The Node attribute dist is required in hierDist and specifies the probability distribution for each data stream at each level of the hierarchy (Figure 14. In this case,
 level1 (corresponding to coarse-scale observations with level=1) has no data streams,
 and each of the data streams for level2 (corresponding to fine-scale observations with
 level=2) is assigned a gamma distribution with an additional point-mass on zero to account for zero changes in depth. 
