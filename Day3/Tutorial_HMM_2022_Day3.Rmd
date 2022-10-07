@@ -35,6 +35,7 @@ library(ggplot2)
 library(dplyr)
 library(lubridate)
 library(data.tree)
+library(DiagrammeR)
 ```
 
 # Tutorial objectives
@@ -400,7 +401,7 @@ checkPar0(tigerSharkData,hierStates=hierStates,hierDist=hierDist,Par0=Par,
 
 When interpreting the output, we are looking at two parts: 
 
-- the estimated state-dependent distribution parameteres
+- the estimated state-dependent distribution parameters
 - the different transition probability matrices that define the differences at the coarse-scale
 
 ```{r, cache=TRUE}
@@ -414,7 +415,7 @@ hhmm
 
 ```
 
-We can also use the same functions as before to visualize our model results.
+We can use the same functions as before to visualize our model results.
 
 ```{r}
 plot(hhmm)
