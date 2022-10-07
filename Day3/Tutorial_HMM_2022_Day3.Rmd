@@ -23,11 +23,12 @@ pre.numberSource code
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(warning = FALSE)
 knitr::opts_chunk$set(cache = TRUE)
+knitr::opts_chunk$set(message = FALSE)
 ```
 
 
 
-```{r,eval=F}
+```{r}
 library(readr)
 library(momentuHMM)
 library(ggplot2)
@@ -36,75 +37,49 @@ library(lubridate)
 library(data.tree)
 ```
 
-```{r,echo=F,message=FALSE}
-
-library(lubridate)
-library(readr)
-library(dplyr)
-library(ggplot2)
-library(momentuHMM)
-
-```
-
-
-<!--**1. Tutorial goals: fit hidden Markov models to accelerometer data in momentuHMM; incorporation of covariates to such models. fit hierarchical Markov models to Depth data;**-->
-
-
 # Tutorial objectives
 
 The goal of this tutorial is to explore how to fit hidden Markov models to accelerometer data, how to incorporate covariates into the transition probabilities, and the implementation of hierarchical Markov models to animal movement data. For the first two objectives, we will use 4 days of acceleration data obtained from a free-ranging blacktip reef shark at Palmyra Atoll in the central Pacific Ocean (data taken from Leos-Barajas et al. 2017). 
 
 
-
-<!--**2. Accelerometer data**
-**- what it is?**-->
-
 # Accelerometer data
 
 Accelerometer devices measure up to three axes, which can be described relative to the body of the animal: longitudinal (surge), lateral (sway) and dorsoventral (heave). These devices are becoming more prevalent in the fields of animal biologging data as they provide a means of measuring activity in a meaningful and quantitative way. From tri-axial acceelration data, we can also derive several measures that summarize effort or exertion and relate acceleration  to activity levels such as overall dynamic body acceleration (ODBA) and vectorial dynamic body acceleration (VeDBA). These metrics can be used to reduce the dimensionality of three-dimension acceleration data while retaining important information. Further, because acceleration data is often at high temporal resolutions over time, it also naturally exhibits a large degree of autocorrelation, making it impossible to assume independence between sequential observations. As we have learned, HMMs can account for the autocorrelation present in the data while assuming that the data were generated according to a finite set of (unobserved) behaviors making them a good candidate model for this type of data structure. Today, we will fit an HMM to the ODBA of a blacktip shark, calculated every second.
 
-<!--**- black tip shark data: variables**-->
-
 For the blacktip shark, we have time of day, water temperature, depth and ODBA. Since one of our goals is to use the time of observations (second of the day) as a covariate, we also need to extract this information from the time variable.
 
-```{r,eval=F}
+
+```{r}
 # Reading the data
-BlacktipB <- read_delim("BlacktipB_original.txt", 
+BlacktipB <- read_delim("data/BlacktipB.txt", 
                         delim = "\t", escape_double = FALSE, 
                         trim_ws = TRUE)
 # Let's transform the date/time info into a proper time format
 # In this case we need to extract the second of the day correspondent to each observation 
 BlacktipB = BlacktipB %>% 
   mutate(Time = as.POSIXct(Time,format = "%m/%d/%Y %H:%M")) %>% 
-  mutate(hour_to_sec =  as.integer(seconds(hm(format(Time, format = "%H:%M")))))
+  mutate(hour_to_sec =  as.integer(seconds(hm(format(Time, format = "%H:%M"))))) %>% 
+  group_by(Time) %>% mutate(sec = row_number()) %>% ungroup() %>% 
+  mutate(sec = case_when(hour_to_sec == 53160 ~ as.integer(sec + 55),
+                         TRUE ~ sec),
+         hour_to_sec = hour_to_sec + sec)
 
-```
-
-
-
-```{r,echo=F}
-
-BlacktipB = readRDS("BlacktipB_tidy.rds")
-
-BlacktipB = BlacktipB %>% select(Time,Temp,Depth,ODBA,hour_to_sec)
 head(BlacktipB)
 
 ```
 
-<!--**3. fitting hidden Markov model fot the data**-->
 
 # Fitting our model
-
-<!--**- Look at data: visualization of ODBA through observed period. Outliers? What do we do with them?**-->
 
 Looking at the ODBA values through the observed period, we find ODBA is unusually high at some times -- for this shark we assumed that values between 0 and 2 were consistent with what we expected. Because accommodating extreme values can pose a problem for identification of an adequate state-dependent distribution in our HMM, we removed them from the data set. However, note that in general, deciding whether to remove extreme values or not will more likely depend on whether we find appropriate distributional forms that can accommodate them. Generally, we need to make sure that extreme values are in fact some artefact of the data collection process, not representative of a behavior of interest, or inconsistent with what we are trying to capture as well. Removing data is not good general practice but instead we can assess on a case-by-case basis. 
 
 We can see the original time series here across the four days: 
-```{r,echo=F}
 
-knitr::include_graphics("plots/timeSeriesODBA.png")
+```{r}
+BlacktipB %>% ggplot(aes(Time,ODBA)) + geom_line()
 
 ```
+
 
 ```{r}
 
@@ -115,14 +90,9 @@ BlacktipB = BlacktipB %>% filter(ODBA <= 2.0)
 And now, the modified time series with values above 2.0 removed.Now, we are ready to start to look for models for this data!
 
 ```{r,echo=F}
-
-knitr::include_graphics("plots/timeSeriesODBA_constrained.png")
+BlacktipB %>% ggplot(aes(Time,ODBA)) + geom_line()
 
 ```
-
-<!--  **- histogram of ODBA.**
-      **- Values range. If all positive, what distirbutions can we assign to the data stream ? Gamma distribution would be ok?**
-      **- Can we deduce from it appropiate initial values for our two behavior distributions?**-->
 
 
 Given our data, we are interested in finding possible behaviours through the observation process (ODBA). Let's take a quick look at the histogram of the observations.
@@ -133,6 +103,7 @@ hist(BlacktipB$ODBA[BlacktipB$ODBA < .4],breaks=80,main="Histogram of ODBA",
      xlab = "ODBA")
 
 ```
+
 
 As we have indicated before, the best way to start when fitting a hidden Markov model is to keep things simple. In this case, we will be considering 2 behavioral states, with gamma state-dependent distributions, and no covariates for the transition probability matrix. As mentioned in previous tutorials, now is time to implement the decisions that we have made so far. For the choice of initial parameter values we can take a quick peak at the data (e.g., using the plots above). From the plots above, we specify the means of our state-dependent distributions as .1 and .3. 
 
@@ -146,39 +117,26 @@ BlacktipBData = prepData(BlacktipB,coordNames = NULL,
 
 ```
 
-
-```{r,eval=F}
-
-fit1 = fitHMM(BlacktipBData,nbStates=2,dist=list(ODBA="gamma"),Par0 = list(ODBA=c(.1,.3,1,1)))
-fit1
-```
-
 Let's take a look at the output of the fitted model. 
 
-```{r,echo=F}
+```{r}
 
-fit1 = readRDS("BlacktipB_m1.rds")
+fit1 = fitHMM(BlacktipBData,nbStates=2,dist=list(ODBA="gamma"),Par0 = list(ODBA=c(.1,.3,1,1)))
+
 fit1
-
 ```
 
-We can also plot the results to obtain a visual representation of the fitted model. 
+We can also plot the results to obtain a visual representation of the fitted model.
 
-```{r,eval=F}
+```{r}
 
 plot(fit1,breaks = 80)
 
 ```
 
-```{r,echo=F}
-
-knitr::include_graphics("fit1_plot.png")
-
-```
-
 Let's include retryFits in the fitHMM function. 
 
-```{r,eval=F}
+```{r}
 set.seed(147)
 fit1_s2 <- fitHMM(BlacktipBData,
                   nbState = 2,
@@ -191,19 +149,18 @@ Seems nothing changed at all!
 
 Now let's go further and include a high perturbation in one of the initial values (instead of .1 and .3, let's do .1 and 2). Do we still have similar estimated coefficients and log likelihood? (no matter the initial values, the coefficients should be similar)
 
-
-```{r, eval=F}
-fit1_s2 <- fitHMM(BlacktipBData,
+```{r}
+fit1_s2_long <- fitHMM(BlacktipBData,
                   nbState = 2,
                   dist=list(ODBA="gamma"),
                   Par0 = list(ODBA=c(.1,1,1,1)))
-```
 
-Now that we've seen this candidate model seems to be "robust":  Is there any behaviour that predominates over the other? What about the ACF? Did the model capture properly the conditional independence between observations? (Seems to not be the case).
+fit1_s2_long
+```
 
 ```{r}
 
-knitr::include_graphics("fit1_PR.png")
+plotPR(fit1)
 
 ```
 
@@ -221,47 +178,34 @@ BlacktipB %>% mutate(day = day(Time)) %>% ggplot(aes(Time,state)) + facet_wrap(~
 
 ```
 
+
+
 # Incorporating covariates
 
 As in Leos-Barajas et al. 2017, we can incorporate other information that may help explain the values of ODBA. In this case, we consider the second of the day of every observation. Time of day is represented by two trigonometric functions with period 24 h, $cos(2\pi t/86,400)$ and $sin(2\pi t/86,400)$ (86 400 is the number of seconds in a day). Using the function cosinor, we can convert our data stream to something that is useful for us. As well, we need to provide the formula corresponding to the regression that will be stored in the transition probability values.
 
-```{r,eval=F}
+```{r}
 # formula corresponding to the regression coefficients for the transition probabilities
 formula = ~ cosinor(hour_to_sec, period = 86400)
 Par0_fit2 <- getPar0(model=fit1, formula=formula)
 
-fit2 = fitHMM(BlacktipBData,nbStates=2,dist=list(ODBA="gamma"),Par0 = list(ODBA=c(.1,.3,1,1)))
+fit2 = fitHMM(BlacktipBData,nbStates=2,dist=list(ODBA="gamma"),Par0 = Par0_fit2$Par,formula=formula)
 
 fit2
 ```
 
-```{r,echo=F}
 
-fit2 = readRDS("BlacktipB_m2.rds")
-fit2
+```{r}
 
-```
-
-
-```{r,eval=F}
-
-plot(fit2)
+plot(fit2,breaks=80)
 
 ```
-
-```{r,echo=F}
-
-knitr::include_graphics("fit2_plot.png")
-knitr::include_graphics("fit2_tp.png")
-
-```
-
 
 Let's explore the results. Do the coefficients vary much? What about the ACF? Did the autocorrelation decrease with this innovation?
 
 ```{r}
 
-knitr::include_graphics("fit2_PR.png")
+plotPR(fit2)
 
 ```
 
@@ -274,16 +218,14 @@ AIC(fit2)
 
 ```
 
-
 # Depth Data
 
-
 Tiger shark data were collected in Oahu, Hawai'i. The shark's depth was recorded in 0.5 m intervals every 2 s over a 23 day period, from March 9 to March 31, 2009. On some days, the tiger shark inhabited varied ranges of depth levels and performed many dives whereas other days it remained relatively constant in the water column and dove less. For sharks, movement in the water column is not easily segmented into types of dives. However, dives, or simply ascending or descending, can be an important part of a shark's behavior. We extracted a depth position every ten minutes from the available data record and sequentially computed the absolute change in depth position, $y^*_t = |d_t - d_{t-1}|$, for the tiger shark in order to understand how the depths inhabited by the shark differ across days. On some days the tiger shark tends to remain in the same part of the water column for long periods of time while on others, it tends to move up and down more frequently throughout the day. We processed the data to produce $M=144$ observations per day, across $K=21$ days, excluding the first and last days for which only partial data records were available. 
- 
+
 ```{r}
 
 # Read the data
-tigerShark <- read_csv("tigershark_depthchange10min.csv")
+tigerShark <- read_csv("data/tigershark_depthchange10min.csv")
 tigerShark = tigerShark %>% mutate(abs_change_depth = abs(Depth - lag(Depth,default = 0)))
 head(tigerShark)
 
@@ -307,8 +249,8 @@ tigerShark %>% filter(days != 9) %>%
 
 The general idea of a hiearchical HMM is that there are (at least) two behavioral processes of interest but they manifest at different temporal scales. For instance, here we will look at both fine-scale vertical movement behavior and across day movement behavior as well. These are referred to as fine state-level (10 min) and coarse state-level behaviors (day). 
 
-To fit these models in momentuHMM, we will introduce a new column called "level". 
-  
+To fit these models in momentuHMM, we will introduce a new column called "level".
+
 ```{r}
 
 days_range = unique(tigerShark$days)
@@ -341,8 +283,8 @@ However, one of the difficulties with hierarchical HMMs is the construction of t
 ```{r}
 
 ### define hierarchical HMM
-### states 1-3 = coarse state 1 
-### states 4-6 = coarse state 2
+### states 1-3 = coarse state 1 (nontravelling)
+### states 4-6 = coarse state 2 (travelling)
 hierStates <- data.tree::Node$new("tiger shark HHMM states")
 hierStates$AddChild(name="nontravelling")
 hierStates$nontravelling$AddChild(name="nt1", state=1)
@@ -370,7 +312,8 @@ hierStates <- data.tree::as.Node(list(name="tiger shark HHMM states",
 
 ```
 
-The name for any of the “children” added to a node are user-specified and are akin
+
+he name for any of the “children” added to a node are user-specified and are akin
 to the stateNames argument in fitHMM for a standard HMM. While these names are
 arbitrary, the name and state attributes must be unique.
 
@@ -386,7 +329,6 @@ hierDist$level2$AddChild(name="abs_change_depth", dist="gamma")
 plot(hierDist)
 
 ```
-
 
 The Node attribute dist is required in hierDist and specifies the probability dis-
 tribution for each data stream at each level of the hierarchy (Figure 14. In this case,
@@ -412,7 +354,7 @@ hierFormulaDelta$AddChild(name="level2", formulaDelta=~1)
 
 ```
 
-We can assume the data stream probability distributions do not depend on the coarse-scale state, so we can constrain the state-dependent parameters for states 1 (“nf1”) and 4 (“f1”), states 2 (“nf2”) and 5 (“f2”), and states 3 (“nf3”) and 6 (“f3”) to be equal using the DM argument:
+We can assume the data stream probability distributions do not depend on the coarse-scale state, so we can constrain the state-dependent parameters for states 1 (“nt1”) and 4 (“t1”), states 2 (“nt2”) and 5 (“t2”), and states 3 (“nt3”) and 6 (“t3”) to be equal using the DM argument:
 
 ```{r}
 
@@ -427,7 +369,6 @@ nbStates <- length(hierStates$Get("state",filterFun=data.tree::isLeaf))
 
 
 ```
-
 
 ```{r}
 
@@ -466,8 +407,7 @@ When interpreting the output, we are looking at two parts:
 - the estimated state-dependent distribution parameteres
 - the different transition probability matrices that define the differences at the coarse-scale
 
-
-```{r,eval=F}
+```{r}
 
 # fit hierarchical HMM
 hhmm <- fitHMM(data=tigerSharkData,hierStates=hierStates,hierDist=hierDist,
@@ -478,35 +418,23 @@ hhmm
 
 ```
 
-```{r,echo=F}
+We can also use the same functions as before to visualize our model results.
 
-hhmm = readRDS("hmm.rds")
-hhmm
-
-```
-
-We can also use the same functions as before to visualize our model results. 
-
-```{r, eval=F}
+```{r}
 plot(hhmm)
 plotPR(hhmm)
 ```
-
 
 # Exercises
 
 Generate new data streams from original datasets (overall mean in different time periods). Does the ACF changes between these data sets? How are they compared to the original data set? What can you say about this?
 
 - Instead of considering observations every second, create a new data set for 10 sec, another for 30 s and 1 min. Code below will generate such data sets. Fit a basic HMM for the each one of these new datasets. Did the ACF changed? does they seems to not break the conditional independence? (i.e., the ACF values are lower?). 
-
   
 ```{r, eval=F}
 
-BlacktipB = BlacktipB %>% group_by(Time) %>% mutate(sec = row_number()) %>% ungroup() %>% 
-  mutate(sec = case_when(hour_to_sec == 53160 ~ as.integer(sec + 55),
-                         TRUE ~ sec),
-         hour_to_sec = hour_to_sec + sec,
-         group_10s = case_when(sec <= 10 ~ 1,
+BlacktipB = BlacktipB %>% 
+  mutate(group_10s = case_when(sec <= 10 ~ 1,
                                10 < sec & sec <= 20 ~ 2,
                                20 < sec & sec <= 30 ~ 3,
                                30 < sec & sec <= 40~ 4,
@@ -535,8 +463,6 @@ BlacktipB = BlacktipB %>% select(Time,Depth,ODBA,hour_to_sec)
 
 ```
 
-
 Fit a 3-state HMM with no covariates and fit another one using time as a covariate. What happents to the ACF? According to loglikelihood and AIC, which model is better?
-
 
 - Reproduce the analysis from the blacktip shark data, but now include three states. What about the ACF? Did something change compared to the 2-state HMM? Now include hour_to_sec as a covariate and fit a new model. What happen with the AIC values and the loglikelihood? According to these, what seems to be a better model?
