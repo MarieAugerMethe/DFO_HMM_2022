@@ -198,7 +198,7 @@ tracks_gps_ls <- tracks_gps %>%
   mutate(x = st_coordinates(tracks_gps)[,"X"],  
          y = st_coordinates(tracks_gps)[,"Y"]) %>%
   st_drop_geometry() %>% 
-  split(.,.$ID)  # split into list
+  split(., .$ID)  # split into list
 ```
 
 ## Approach 1: Interpolation
@@ -300,7 +300,7 @@ set.seed(1)
 HMM_gps_linear <- fitHMM(prep_gps_linear, nbState = nbState, dist = dist, Par0 = Par0, stateNames = stateNames)
 
 # plot HMM output
-plot(HMM_gps_linear, ask = FALSE, animals = "T172062")
+plot(HMM_gps_linear, ask = TRUE, animals = "T172062")
 plotPR(HMM_gps_linear)
 ```
 
@@ -366,7 +366,11 @@ tracks_gps_crw <- data.frame(crw_gps_10$crwPredict) %>%
 
 ## Approach 2: Voiding data gaps {#void-gaps}
 
-One strategy to address large data gaps is to void the data streams (i.e., step length and turning angle) during moderate/large interpolated gaps where we expect that the estimated movement is largely independent of the observed data before or after the gap. For my own work, I have typically voided sections with $>6$ missing locations. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. In this case, I will void the data streams from locations predicting in gaps $>60$ min. First, we will identify which steps need to be voided, then we will prepare the data and void the estimated `step` and `angle` data streams. We will do this again later in the tutorial, so we will wrap it into a function called `prepData_NAGaps`. The function will output a `momentuHMMData` object that can directly be fit using `fitHMM`.
+Another strategy to address data gaps is to leaving the data streams (i.e., step length and turning angle) as NAs. For my own work, I have typically voided sections with $>6$ missing locations. The maximum size of a gap to allow depends on the frequency of the missing data, frequency of locations, study species, and behaviours of interest. 
+
+Voiding gaps is particularly useful for moderate and large gaps, however, it may often be the best option for small gaps as well. The only catch is that although HMMs can allow for missing data in the state-dependent observation data (e.g., step length and turn angle), HMMs cannot have missing data if there are covariates on the transition probability (for example, if there was an effect of bathymetry on state probability). If you do have an HMM with covariates, and missing records, you have several options. First, you can simply use a linear averaging of the two most recent observed covariate values (i.e., immediately before and after a gap). Second, you can interpolate missing locations using one of the previous methods and extract covariates at the interpolated locations. Last, you can interpolate locations, extract covariates, and then void the data streams. The last option may be the most appropriate as it provides the model with the minimum information to run and minimises spurious interpolate data.   
+
+In this case, I will void the data streams from locations predicting in gaps $>60$ min. First, we will identify which steps need to be voided, then we will prepare the data and void the estimated `step` and `angle` data streams. We will do this again later in the tutorial, so we will wrap it into a function called `prepData_NAGaps`. The function will output a `momentuHMMData` object that can directly be fit using `fitHMM`.
 
 ```{r id_void_gaps, attr.source = ".numberLines"}
 # define function to replace step and turn angle of large gaps with NA
@@ -511,7 +515,7 @@ There's not much difference from the previous model, so this approach may not be
 
 The last approach to estimate missing locations and regularise the data is multiple imputation ([Hooten et al. 2017](https://www.taylorfrancis.com/books/mono/10.1201/9781315117744/animal-movement-mevin-hooten-devin-johnson-brett-mcclintock-juan-morales); [McClintock et al. 2017](https://besjournals.onlinelibrary.wiley.com/doi/pdf/10.1111/2041-210X.12995)). Multiple imputation works by first fitting a CTCRW model to the original data, second, drawing (i.e., simulating) a number of realisations of the position process based on the CTCRW model, third, fitting HMMs to each of the simulated realisations, and finally, pooling the estimated parameters.
 
-`momentuHMM` has several functions to implement multiple imputation. The function `MIfitHMMW` can be used both to simulate realisations of a fitted CTCRW and fit HMMs to each one. The number of simulations is specified with `nSims`. We can simulate realisations without fitting HMMs by setting `fit = FALSE`. Here, let's use the CTCRW model that we fit in section \@ref(stat-int) to simulate 4 tracks using `MIfitHMMW` and plot them over the original track.
+`momentuHMM` has several functions to implement multiple imputation. The function `MIfitHMM` can be used both to simulate realisations of a fitted CTCRW and fit HMMs to each one. The number of simulations is specified with `nSims`. We can simulate realisations without fitting HMMs by setting `fit = FALSE`. Here, let's use the CTCRW model that we fit in section \@ref(stat-int) to simulate 4 tracks using `MIfitHMM` and plot them over the original track.
 
 ```{r MI_sim_10min_GPS, attr.source = ".numberLines", message=FALSE, cache = TRUE}
 set.seed(1)
@@ -762,7 +766,7 @@ head(dives_sum)
 
 Note: some "valid" dives do not have a "bottom distance" if the narwhal spent little time at depth. When summarising `bottdist` for these dives, `max` returns `-Inf`, which returns warnings from `R`. 
 
-In addition, we used 2 different `ifelse` statements. First, `ifelse(NA_t == 10, ...)` ensured that we only calculate mean and maximum depth for periods where we have at least 1.25 min of depth data. Second, `ifelse(surf_t > 5, ...)` ensured that we only calculate dive metrics when at least half of the 10 min interval is spent in a dive, otherwise the animal is assumed to be at the surface and its dive metric is `NA`.
+In addition, we used 2 different `ifelse` statements. First, `ifelse(NA_t == 10, ...)` ensured that we only calculate mean and maximum depth for periods where we have at least 1.25 min of depth data. Second, `ifelse(surf_t < 5, ...)` ensured that we only calculate dive metrics when at least half of the 10 min interval is spent in a dive, otherwise the animal is assumed to be at the surface and its dive metric is `NA`.
 
 Any of the eight variables can be used as data streams in the HMM, however, including too many would significantly increase the number of parameters to estimate, and consequently computation time. Therefore, we must select which variables to use, which there are different several approaches:  
 
