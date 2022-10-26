@@ -37,7 +37,6 @@ In this tutorial, will be using two weeks of tracking data for three narwhal pro
 # Setup workspace
 
 First, we'll setup the workspace with required packages.
-
 ```{r import_libraries, message=FALSE, attr.source = ".numberLines"}
 library(dplyr)     # data management
 library(tidyr)     # data management
@@ -61,8 +60,8 @@ library(kableExtra)# produce visually appealing tables
 
 Make sure to set working directory to "Day2" of the HMM workshop folder:
 
-```{r, eval=FALSE, message=FALSE, attr.source = ".numberLines"}
-setwd("Day2")
+```{r, message=FALSE, attr.source = ".numberLines"}
+knitr::opts_knit$set(root.dir = "C:/Users/rtogunov/Documents/Work/DFO_HMM_2022/Day2")
 ```
 
 # Import data and initial data processing
@@ -827,7 +826,7 @@ hist(log(dives_sum$post_dive_dur), 100,
 
 Mean depth has a good spread and clear bimodal distribution. Maximum depth has great structure with potentially three modes and some dispersion (a little low on the lower quantile). Dive time shows very little structure, multimodality, and has quite a fragmented distribution (difficult to model with continuous distributions). Bottom time also has very little structure and is quite fragmented. Proportion at the bottom has little structure and is also a bit fragmented. Maximum dive depth has pretty good structure with two clear modes and is not over-dispersed. Bottom distance has some amount of structure, with potentially multiple modes, but is slightly over-dispersed with some fragmentation in the lower values. Last, post-dive duration has little structure, is quite fragmented, and is overdispersed. In my subjective views, the best variable based on the histograms is max depth, followed by bottom distance, mean depth, and max dive depth.
 
-```{r data_structure3, attr.source = ".numberLines", fig.asp =1.5, cache.rebuild=T}
+```{r data_structure3, attr.source = ".numberLines", fig.asp =1.5}
 # Third, balanced autocorrelation
 dives_sum_filter <- filter(dives_sum, ID == "T172062")
 par(mfrow = c(4,2))
@@ -1757,16 +1756,20 @@ tracks_argos %>%
 
 In this section, we will use 45 min as a trade-off between higher resolution and minimising data gaps.
 
-Next, we will define the model structure for `crawl`. The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)).
+Next, we will define the model structure for `crawl`. First, we will define the error model, which describes or estimates the location error around the observed locations based on the ARGOS error class. If error ellipse are provided (i.e., x and y), then we define each separately as follows
+```{r, eval = F}
+# define ellipsoid error model
+err.model <- list(x = ~ loc_class - 1, y = ~ loc_class - 1)
+```
 
-```{r fit_45_min_crawl_to_argos_tracks, message=FALSE, attr.source = ".numberLines", cache=T}
-# split ARGOS tracks by ID
-tracks_argos_ls <- tracks_argos %>%
-  mutate(x = st_coordinates(tracks_argos)[,"X"],
-         y = st_coordinates(tracks_argos)[,"Y"]) %>%
-  st_drop_geometry() %>%
-    split(.,.$ID)
+However, in our data, we are only provided with error classes for each location, therefore, we will assume a circular error radius around each point (same between x and y). In `crawl` this is achieved by defining the error model for only one of the coordinates as follows:
+```{r}
+# define circular error model
+err.model <- list(x = ~ loc_class - 1)
+```
 
+The `crawl` tutorial suggests that users define prior distributions to optimize the fit and increase the model’s ability to converge with limited/challenging data while providing the model flexibility. Here, we provide a normal distribution of the log-transformed error for each of the ARGOS error classes. The tutorial also suggest users rely on the prior distribution for the beta parameter centered on -4 (smoother fit) and, if needed, fix the beta parameter to -4 (see `crawl` tutorial [HERE](https://jmlondon.github.io/crawl-workshop/crawl-practical.html#predicting-a-movement-track)). Note: if using an 
+```{r define_crawl_priors, message=FALSE, attr.source = ".numberLines"}
 # define priors
 prior <- function(p) {
   dnorm(p[1], log(250),  0.2, log = TRUE) +  # 3
@@ -1778,9 +1781,17 @@ prior <- function(p) {
   # skip p[7] as we won't provide a prior for sigma
   dnorm(p[8], -4, 3, log = TRUE)  # beta parameter
 }
+```
 
-# define error model
-err.model <- list(x = ~ loc_class - 1, y = ~ loc_class - 1)
+Now we will define the times to predict for each individual and fit the crawl model. 
+```{r define_predTime_fit_crawl, message=FALSE, attr.source = ".numberLines", cache=TRUE}
+# split ARGOS tracks by ID
+tracks_argos_ls <- tracks_argos %>%
+  mutate(x = st_coordinates(tracks_argos)[,"X"],
+         y = st_coordinates(tracks_argos)[,"Y"]) %>%
+  st_drop_geometry() %>%
+    split(.,.$ID)
+
 # define times to predict for easier comparison between ARGOS and GPS tracks
 predTime <- lapply(tracks_argos_ls, function(x)
   seq(first(x$time), last(x$time), "45 min"))
@@ -2012,10 +2023,8 @@ data.df %>%
             mean_dy = mean(dy, na.rm = T))
 
 # define fixPar using abover
-fixPar <- c(log(767),  log(969),  log(1200), # x 3,2,1
-            log(1831), log(1811), log(1972), # x 0,A,B
-            log(717),  log(1343), log(1150), # y 3,2,1
-            log(1666), log(1448), log(1882), # y 0,A,B
+fixPar <- c(log(767),  log(969),  log(1200), # 3,2,1
+            log(1831), log(1811), log(1972), # 0,A,B
             NA, NA) # sgima, beta (to be estimated)
 ```
 
